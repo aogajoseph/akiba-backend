@@ -2,39 +2,56 @@ import { Router } from 'express';
 
 import {
   ApiResponse,
+  CreateApprovalRequestDto,
   CreateApprovalResponseDto,
   ListApprovalsResponseDto,
 } from '../../../shared/contracts';
-import { approvals, transactions } from '../data/store';
+import { getTransaction } from '../services/transactionService';
+import { createApproval, listApprovals } from '../services/approvalService';
 
 const router = Router({ mergeParams: true });
 
-router.get('/', (req, res) => {
-  const transactionApprovals = approvals.filter(
-    (item) => item.transactionId === req.params.transactionId,
-  );
-  const response: ApiResponse<ListApprovalsResponseDto> = {
-    data: {
-      approvals: transactionApprovals.length > 0 ? transactionApprovals : approvals,
-    },
-  };
+const getCurrentUserId = (headerValue: string | undefined): string => {
+  return headerValue ?? 'user_1';
+};
 
-  res.json(response);
+router.get('/', (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    const approvalList = listApprovals(transactionId);
+    const response: ApiResponse<ListApprovalsResponseDto> = {
+      data: {
+        approvals: approvalList,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to list approvals';
+    res.status(400).json({ error: message });
+  }
 });
 
 router.post('/', (req, res) => {
-  const approval = approvals.find((item) => item.transactionId === req.params.transactionId) ?? approvals[0];
-  const transaction =
-    transactions.find((item) => item.id === req.params.transactionId) ?? transactions[0];
+  try {
+    const { groupId, transactionId } = req.params;
+    const signatoryUserId = getCurrentUserId(req.header('x-user-id'));
+    const dto = req.body as CreateApprovalRequestDto;
+    const approval = createApproval(transactionId, signatoryUserId, dto);
+    const transaction = getTransaction(groupId, transactionId);
 
-  const response: ApiResponse<CreateApprovalResponseDto> = {
-    data: {
-      approval,
-      transaction,
-    },
-  };
+    const response: ApiResponse<CreateApprovalResponseDto> = {
+      data: {
+        approval,
+        transaction,
+      },
+    };
 
-  res.status(201).json(response);
+    res.status(201).json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create approval';
+    res.status(400).json({ error: message });
+  }
 });
 
 export default router;

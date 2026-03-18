@@ -2,66 +2,98 @@ import { Router } from 'express';
 
 import {
   ApiResponse,
+  CreateDepositRequestDto,
   CreateDepositResponseDto,
+  CreateWithdrawalRequestDto,
   CreateWithdrawalResponseDto,
   GetTransactionResponseDto,
   ListTransactionsResponseDto,
-  TransactionType,
 } from '../../../shared/contracts';
-import { transactions } from '../data/store';
+import {
+  createDeposit,
+  createWithdrawal,
+  getTransaction,
+  listTransactions,
+} from '../services/transactionService';
 
 const router = Router({ mergeParams: true });
 
+const getCurrentUserId = (headerValue: string | undefined): string => {
+  return headerValue ?? 'user_1';
+};
+
 router.post('/deposits', (req, res) => {
-  const transaction =
-    transactions.find(
-      (item) => item.groupId === req.params.groupId && item.type === TransactionType.DEPOSIT,
-    ) ?? transactions[0];
+  try {
+    const { groupId } = req.params;
+    const userId = getCurrentUserId(req.header('x-user-id'));
+    const dto = req.body as CreateDepositRequestDto;
+    const transaction = createDeposit(groupId, userId, dto);
 
-  const response: ApiResponse<CreateDepositResponseDto> = {
-    data: {
-      transaction,
-    },
-  };
+    const response: ApiResponse<CreateDepositResponseDto> = {
+      data: {
+        transaction,
+      },
+    };
 
-  res.status(201).json(response);
+    res.status(201).json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create deposit';
+    res.status(400).json({ error: message });
+  }
 });
 
 router.post('/withdrawals', (req, res) => {
-  const transaction =
-    transactions.find(
-      (item) => item.groupId === req.params.groupId && item.type === TransactionType.WITHDRAWAL,
-    ) ?? transactions[0];
+  try {
+    const { groupId } = req.params;
+    const userId = getCurrentUserId(req.header('x-user-id'));
+    const dto = req.body as CreateWithdrawalRequestDto;
+    const transaction = createWithdrawal(groupId, userId, dto);
 
-  const response: ApiResponse<CreateWithdrawalResponseDto> = {
-    data: {
-      transaction,
-    },
-  };
+    const response: ApiResponse<CreateWithdrawalResponseDto> = {
+      data: {
+        transaction,
+      },
+    };
 
-  res.status(201).json(response);
+    res.status(201).json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create withdrawal';
+    res.status(400).json({ error: message });
+  }
 });
 
 router.get('/', (req, res) => {
-  const groupTransactions = transactions.filter((item) => item.groupId === req.params.groupId);
-  const response: ApiResponse<ListTransactionsResponseDto> = {
-    data: {
-      transactions: groupTransactions.length > 0 ? groupTransactions : transactions,
-    },
-  };
+  try {
+    const { groupId } = req.params;
+    const groupTransactions = listTransactions(groupId);
+    const response: ApiResponse<ListTransactionsResponseDto> = {
+      data: {
+        transactions: groupTransactions,
+      },
+    };
 
-  res.json(response);
+    res.json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to list transactions';
+    res.status(400).json({ error: message });
+  }
 });
 
 router.get('/:transactionId', (req, res) => {
-  const transaction = transactions.find((item) => item.id === req.params.transactionId) ?? transactions[0];
-  const response: ApiResponse<GetTransactionResponseDto> = {
-    data: {
-      transaction,
-    },
-  };
+  try {
+    const { groupId, transactionId } = req.params;
+    const transaction = getTransaction(groupId, transactionId);
+    const response: ApiResponse<GetTransactionResponseDto> = {
+      data: {
+        transaction,
+      },
+    };
 
-  res.json(response);
+    res.json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to get transaction';
+    res.status(404).json({ error: message });
+  }
 });
 
 export default router;
