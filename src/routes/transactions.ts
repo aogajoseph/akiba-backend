@@ -7,8 +7,19 @@ import {
   CreateWithdrawalRequestDto,
   CreateWithdrawalResponseDto,
   GetTransactionResponseDto,
+  Group,
+  GroupMember,
   ListTransactionsResponseDto,
+  Transaction,
+  User,
 } from '../../../shared/contracts';
+import { groupMembers, groups, users } from '../data/store';
+import {
+  createHttpError,
+  ensureNonEmptyString,
+  ensurePositiveNumber,
+  getObjectBody,
+} from '../utils/http';
 import {
   createDeposit,
   createWithdrawal,
@@ -18,16 +29,80 @@ import {
 
 const router = Router({ mergeParams: true });
 
-const getCurrentUserId = (headerValue: string | undefined): string => {
-  return headerValue ?? 'user_1';
+const getCurrentUser = (headerValue: string | undefined): User => {
+  const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
+  const user = users.find((item) => item.id === userId);
+
+  if (!user) {
+    throw createHttpError(404, 'User not found');
+  }
+
+  return user;
 };
 
-router.post('/deposits', (req, res) => {
+const getGroupById = (groupId: string): Group => {
+  const group = groups.find((item) => item.id === groupId);
+
+  if (!group) {
+    throw createHttpError(404, 'Group not found');
+  }
+
+  return group;
+};
+
+const requireMembership = (groupId: string, userId: string): GroupMember => {
+  const membership = groupMembers.find(
+    (item) => item.groupId === groupId && item.userId === userId,
+  );
+
+  if (!membership) {
+    throw createHttpError(403, 'You are not a member of this group');
+  }
+
+  return membership;
+};
+
+const parseDepositDto = (body: Record<string, unknown>): CreateDepositRequestDto => {
+  return {
+    amount: ensurePositiveNumber(body.amount, 'amount must be a positive number'),
+    currency: ensureNonEmptyString(body.currency, 'currency is required'),
+    description:
+      body.description === undefined
+        ? undefined
+        : ensureNonEmptyString(body.description, 'description must be a non-empty string'),
+  };
+};
+
+const parseWithdrawalDto = (body: Record<string, unknown>): CreateWithdrawalRequestDto => {
+  return {
+    amount: ensurePositiveNumber(body.amount, 'amount must be a positive number'),
+    currency: ensureNonEmptyString(body.currency, 'currency is required'),
+    description:
+      body.description === undefined
+        ? undefined
+        : ensureNonEmptyString(body.description, 'description must be a non-empty string'),
+    destination: ensureNonEmptyString(body.destination, 'destination is required'),
+  };
+};
+
+const requireTransaction = (groupId: string, transactionId: string): Transaction => {
+  const transaction = getTransaction(groupId, transactionId);
+
+  if (!transaction) {
+    throw createHttpError(404, 'Transaction not found');
+  }
+
+  return transaction;
+};
+
+router.post('/deposits', (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const userId = getCurrentUserId(req.header('x-user-id'));
-    const dto = req.body as CreateDepositRequestDto;
-    const transaction = createDeposit(groupId, userId, dto);
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+    const dto = parseDepositDto(getObjectBody(req.body));
+    const transaction = createDeposit(groupId, user.id, dto);
 
     const response: ApiResponse<CreateDepositResponseDto> = {
       data: {
@@ -37,17 +112,18 @@ router.post('/deposits', (req, res) => {
 
     res.status(201).json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create deposit';
-    res.status(400).json({ error: message });
+    next(error);
   }
 });
 
-router.post('/withdrawals', (req, res) => {
+router.post('/withdrawals', (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const userId = getCurrentUserId(req.header('x-user-id'));
-    const dto = req.body as CreateWithdrawalRequestDto;
-    const transaction = createWithdrawal(groupId, userId, dto);
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+    const dto = parseWithdrawalDto(getObjectBody(req.body));
+    const transaction = createWithdrawal(groupId, user.id, dto);
 
     const response: ApiResponse<CreateWithdrawalResponseDto> = {
       data: {
@@ -57,32 +133,37 @@ router.post('/withdrawals', (req, res) => {
 
     res.status(201).json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create withdrawal';
-    res.status(400).json({ error: message });
+    next(error);
   }
 });
 
-router.get('/', (req, res) => {
+router.get('/', (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const groupTransactions = listTransactions(groupId);
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+
     const response: ApiResponse<ListTransactionsResponseDto> = {
       data: {
-        transactions: groupTransactions,
+        transactions: listTransactions(groupId),
       },
     };
 
     res.json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to list transactions';
-    res.status(400).json({ error: message });
+    next(error);
   }
 });
 
-router.get('/:transactionId', (req, res) => {
+router.get('/:transactionId', (req, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
-    const transaction = getTransaction(groupId, transactionId);
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+    const transaction = requireTransaction(groupId, transactionId);
+
     const response: ApiResponse<GetTransactionResponseDto> = {
       data: {
         transaction,
@@ -91,8 +172,7 @@ router.get('/:transactionId', (req, res) => {
 
     res.json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to get transaction';
-    res.status(404).json({ error: message });
+    next(error);
   }
 });
 

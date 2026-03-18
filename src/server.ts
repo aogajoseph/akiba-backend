@@ -7,6 +7,7 @@ import authRouter from './routes/auth';
 import groupsRouter from './routes/groups';
 import messagesRouter from './routes/messages';
 import transactionsRouter from './routes/transactions';
+import { errorHandler } from './utils/http';
 
 dotenv.config();
 
@@ -25,6 +26,12 @@ app.use('/groups', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);
 app.use('/groups/:groupId/messages', messagesRouter);
+
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+app.use(errorHandler);
 
 app.listen(port, () => {
   console.log(`Akiba backend listening on port ${port}`);

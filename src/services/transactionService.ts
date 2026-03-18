@@ -5,23 +5,16 @@ import {
   TransactionStatus,
   TransactionType,
 } from '../../../shared/contracts';
-import { groups, transactions } from '../data/store';
-
-const createTransactionId = () => `txn_${Date.now()}`;
+import { transactions } from '../data/store';
+import { createId } from '../utils/http';
 
 export const createDeposit = (
   groupId: string,
   userId: string,
   dto: CreateDepositRequestDto,
 ): Transaction => {
-  const group = groups.find((item) => item.id === groupId);
-
-  if (!group) {
-    throw new Error('Group not found');
-  }
-
   const transaction: Transaction = {
-    id: createTransactionId(),
+    id: createId('txn'),
     groupId,
     initiatedByUserId: userId,
     type: TransactionType.DEPOSIT,
@@ -42,14 +35,8 @@ export const createWithdrawal = (
   userId: string,
   dto: CreateWithdrawalRequestDto,
 ): Transaction => {
-  const group = groups.find((item) => item.id === groupId);
-
-  if (!group) {
-    throw new Error('Group not found');
-  }
-
   const transaction: Transaction = {
-    id: createTransactionId(),
+    id: createId('txn'),
     groupId,
     initiatedByUserId: userId,
     type: TransactionType.WITHDRAWAL,
@@ -70,14 +57,11 @@ export const listTransactions = (groupId: string): Transaction[] => {
   return transactions.filter((item) => item.groupId === groupId);
 };
 
-export const getTransaction = (groupId: string, transactionId: string): Transaction => {
-  const transaction = transactions.find(
+export const getTransaction = (
+  groupId: string,
+  transactionId: string,
+): Transaction | undefined => {
+  return transactions.find(
     (item) => item.groupId === groupId && item.id === transactionId,
   );
-
-  if (!transaction) {
-    throw new Error('Transaction not found');
-  }
-
-  return transaction;
 };

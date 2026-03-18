@@ -2,13 +2,10 @@ import {
   Approval,
   ApprovalStatus,
   CreateApprovalRequestDto,
-  GroupRole,
   TransactionStatus,
-  TransactionType,
 } from '../../../shared/contracts';
-import { approvals, groupMembers, groups, transactions } from '../data/store';
-
-const createApprovalId = () => `approval_${Date.now()}`;
+import { approvals, groups, transactions } from '../data/store';
+import { createId } from '../utils/http';
 
 const updateWithdrawalStatus = (transactionId: string): void => {
   const transaction = transactions.find((item) => item.id === transactionId);
@@ -49,38 +46,8 @@ export const createApproval = (
   signatoryUserId: string,
   dto: CreateApprovalRequestDto,
 ): Approval => {
-  const transaction = transactions.find((item) => item.id === transactionId);
-
-  if (!transaction) {
-    throw new Error('Transaction not found');
-  }
-
-  if (transaction.type !== TransactionType.WITHDRAWAL) {
-    throw new Error('Only withdrawals can be approved');
-  }
-
-  const membership = groupMembers.find(
-    (item) =>
-      item.groupId === transaction.groupId &&
-      item.userId === signatoryUserId &&
-      item.role === GroupRole.SIGNATORY,
-  );
-
-  if (!membership) {
-    throw new Error('Only signatories can approve or reject transactions');
-  }
-
-  const existingApproval = approvals.find(
-    (item) =>
-      item.transactionId === transactionId && item.signatoryUserId === signatoryUserId,
-  );
-
-  if (existingApproval) {
-    throw new Error('Signatory has already approved or rejected this transaction');
-  }
-
   const approval: Approval = {
-    id: createApprovalId(),
+    id: createId('approval'),
     transactionId,
     signatoryUserId,
     status: dto.status,
