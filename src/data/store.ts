@@ -1,6 +1,5 @@
 import {
   Approval,
-  ApprovalStatus,
   Group,
   GroupMember,
   GroupRole,
@@ -11,12 +10,26 @@ import {
   User,
 } from '../../../shared/contracts';
 
+const now = new Date().toISOString();
+
 export const users: User[] = [
   {
     id: 'user_1',
     phoneNumber: '+254700000001',
     name: 'Amina',
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+  },
+  {
+    id: 'user_2',
+    phoneNumber: '+254700000002',
+    name: 'Brian',
+    createdAt: now,
+  },
+  {
+    id: 'user_3',
+    phoneNumber: '+254700000003',
+    name: 'Caro',
+    createdAt: now,
   },
 ];
 
@@ -26,7 +39,7 @@ export const groups: Group[] = [
     name: 'Sunday Savers',
     createdByUserId: 'user_1',
     approvalThreshold: 2,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
   },
 ];
 
@@ -36,7 +49,21 @@ export const groupMembers: GroupMember[] = [
     groupId: 'group_1',
     userId: 'user_1',
     role: GroupRole.SIGNATORY,
-    joinedAt: new Date().toISOString(),
+    joinedAt: now,
+  },
+  {
+    id: 'member_2',
+    groupId: 'group_1',
+    userId: 'user_2',
+    role: GroupRole.SIGNATORY,
+    joinedAt: now,
+  },
+  {
+    id: 'member_3',
+    groupId: 'group_1',
+    userId: 'user_3',
+    role: GroupRole.MEMBER,
+    joinedAt: now,
   },
 ];
 
@@ -44,37 +71,29 @@ export const transactions: Transaction[] = [
   {
     id: 'txn_1',
     groupId: 'group_1',
-    initiatedByUserId: 'user_1',
+    initiatedByUserId: 'user_3',
     type: TransactionType.DEPOSIT,
     amount: 2500,
     currency: 'KES',
     description: 'Initial contribution',
     status: TransactionStatus.COMPLETED,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
   },
   {
     id: 'txn_2',
     groupId: 'group_1',
-    initiatedByUserId: 'user_1',
+    initiatedByUserId: 'user_3',
     type: TransactionType.WITHDRAWAL,
     amount: 1000,
     currency: 'KES',
     description: 'Emergency support',
     destination: 'M-Pesa 0712345678',
     status: TransactionStatus.PENDING_APPROVAL,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
   },
 ];
 
-export const approvals: Approval[] = [
-  {
-    id: 'approval_1',
-    transactionId: 'txn_2',
-    signatoryUserId: 'user_1',
-    status: ApprovalStatus.APPROVED,
-    createdAt: new Date().toISOString(),
-  },
-];
+export const approvals: Approval[] = [];
 
 export const messages: Message[] = [
   {
@@ -82,6 +101,13 @@ export const messages: Message[] = [
     groupId: 'group_1',
     senderUserId: 'user_1',
     text: 'Welcome to the group.',
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+  },
+  {
+    id: 'message_2',
+    groupId: 'group_1',
+    senderUserId: 'user_3',
+    text: 'I have added my first contribution.',
+    createdAt: now,
   },
 ];
