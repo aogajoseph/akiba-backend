@@ -7,20 +7,28 @@ import {
   GetGroupResponseDto,
   Group,
   GroupMember,
-  GroupRole,
   JoinGroupResponseDto,
   ListGroupMembersResponseDto,
+  ListGroupSignatoriesResponseDto,
   ListGroupsResponseDto,
+  PromoteGroupMemberResponseDto,
+  RevokeGroupMemberResponseDto,
   User,
 } from '../../../shared/contracts';
 import { groupMembers, groups, users } from '../data/store';
 import {
   createHttpError,
-  createId,
   ensureNonEmptyString,
   ensurePositiveInteger,
   getObjectBody,
 } from '../utils/http';
+import {
+  createGroup,
+  getSignatoryReport,
+  joinGroup,
+  promoteMember,
+  revokeMember,
+} from '../services/groupService';
 
 const router = Router();
 
@@ -69,24 +77,7 @@ router.post('/', (req, res, next) => {
       ),
     };
 
-    const group: Group = {
-      id: createId('group'),
-      name: dto.name,
-      createdByUserId: user.id,
-      approvalThreshold: dto.approvalThreshold,
-      createdAt: new Date().toISOString(),
-    };
-
-    const creatorMembership: GroupMember = {
-      id: createId('member'),
-      groupId: group.id,
-      userId: user.id,
-      role: GroupRole.SIGNATORY,
-      joinedAt: new Date().toISOString(),
-    };
-
-    groups.push(group);
-    groupMembers.push(creatorMembership);
+    const { group } = createGroup(user.id, dto);
 
     const response: ApiResponse<CreateGroupResponseDto> = {
       data: {
@@ -151,15 +142,7 @@ router.post('/:groupId/join', (req, res, next) => {
       throw createHttpError(409, 'User is already a member of this group');
     }
 
-    const member: GroupMember = {
-      id: createId('member'),
-      groupId: group.id,
-      userId: user.id,
-      role: GroupRole.MEMBER,
-      joinedAt: new Date().toISOString(),
-    };
-
-    groupMembers.push(member);
+    const member = joinGroup(group.id, user.id);
 
     const response: ApiResponse<JoinGroupResponseDto> = {
       data: {
@@ -183,6 +166,55 @@ router.get('/:groupId/members', (req, res, next) => {
     const response: ApiResponse<ListGroupMembersResponseDto> = {
       data: {
         members,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:groupId/signatories', (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const report = getSignatoryReport(req.params.groupId, user.id);
+
+    const response: ApiResponse<ListGroupSignatoriesResponseDto> = {
+      data: report,
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:groupId/members/:memberId/promote', (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const member = promoteMember(req.params.groupId, req.params.memberId, user.id);
+
+    const response: ApiResponse<PromoteGroupMemberResponseDto> = {
+      data: {
+        member,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:groupId/members/:memberId/revoke', (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const member = revokeMember(req.params.groupId, req.params.memberId, user.id);
+
+    const response: ApiResponse<RevokeGroupMemberResponseDto> = {
+      data: {
+        member,
       },
     };
 
