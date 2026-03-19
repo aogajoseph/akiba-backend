@@ -25,6 +25,7 @@ app.get('/health', (_req, res) => {
 app.use('/auth', authRouter);
 app.use('/users', usersRouter);
 app.use('/groups', groupsRouter);
+app.use('/spaces', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);
 app.use('/groups/:groupId/messages', messagesRouter);

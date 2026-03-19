@@ -15,6 +15,7 @@ import {
   ListGroupsResponseDto,
   PromoteGroupMemberResponseDto,
   RevokeGroupMemberResponseDto,
+  SpaceAdmin,
   User,
 } from '../../../shared/contracts';
 import { groupMembers, groups, users } from '../data/store';
@@ -69,6 +70,14 @@ const requireMembership = (groupId: string, userId: string): GroupMember => {
   return membership;
 };
 
+const toAdmin = (item: { userId: string; name: string }): SpaceAdmin => {
+  return {
+    userId: item.userId,
+    name: item.name,
+    role: 'admin',
+  };
+};
+
 router.post('/', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
@@ -86,6 +95,7 @@ router.post('/', (req, res, next) => {
     const response: ApiResponse<CreateGroupResponseDto> = {
       data: {
         group,
+        space: group,
       },
     };
 
@@ -106,6 +116,7 @@ router.get('/', (req, res, next) => {
     const response: ApiResponse<ListGroupsResponseDto> = {
       data: {
         groups: visibleGroups,
+        spaces: visibleGroups,
       },
     };
 
@@ -124,6 +135,7 @@ router.get('/:groupId', (req, res, next) => {
     const response: ApiResponse<GetGroupResponseDto> = {
       data: {
         group,
+        space: group,
       },
     };
 
@@ -141,6 +153,7 @@ router.delete('/:groupId', (req, res, next) => {
     const response: ApiResponse<DeleteGroupResponseDto> = {
       data: {
         groupId,
+        spaceId: groupId,
       },
     };
 
@@ -217,9 +230,14 @@ router.get('/:groupId/signatories', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const report = getSignatoryReport(req.params.groupId, user.id);
+    const admins = report.signatories.map(toAdmin);
 
     const response: ApiResponse<ListGroupSignatoriesResponseDto> = {
-      data: report,
+      data: {
+        admins,
+        remainingSlots: report.remainingSlots,
+        signatories: admins,
+      },
     };
 
     res.json(response);
