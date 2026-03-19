@@ -4,10 +4,12 @@ import {
   ApiResponse,
   CreateGroupRequestDto,
   CreateGroupResponseDto,
+  DeleteGroupResponseDto,
   GetGroupResponseDto,
   Group,
   GroupMember,
   JoinGroupResponseDto,
+  LeaveGroupResponseDto,
   ListGroupMembersResponseDto,
   ListGroupSignatoriesResponseDto,
   ListGroupsResponseDto,
@@ -24,8 +26,10 @@ import {
 } from '../utils/http';
 import {
   createGroup,
+  deleteGroup,
   getSignatoryReport,
   joinGroup,
+  leaveGroup,
   promoteMember,
   revokeMember,
 } from '../services/groupService';
@@ -129,6 +133,23 @@ router.get('/:groupId', (req, res, next) => {
   }
 });
 
+router.delete('/:groupId', (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const groupId = deleteGroup(req.params.groupId, user.id);
+
+    const response: ApiResponse<DeleteGroupResponseDto> = {
+      data: {
+        groupId,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/:groupId/join', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
@@ -151,6 +172,23 @@ router.post('/:groupId/join', (req, res, next) => {
     };
 
     res.status(201).json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:groupId/members/:memberId/leave', (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const member = leaveGroup(req.params.groupId, req.params.memberId, user.id);
+
+    const response: ApiResponse<LeaveGroupResponseDto> = {
+      data: {
+        member,
+      },
+    };
+
+    res.json(response);
   } catch (error) {
     next(error);
   }

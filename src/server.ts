@@ -7,6 +7,7 @@ import authRouter from './routes/auth';
 import groupsRouter from './routes/groups';
 import messagesRouter from './routes/messages';
 import transactionsRouter from './routes/transactions';
+import usersRouter from './routes/users';
 import { errorHandler } from './utils/http';
 
 dotenv.config();
@@ -22,6 +23,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/auth', authRouter);
+app.use('/users', usersRouter);
 app.use('/groups', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);

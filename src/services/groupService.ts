@@ -5,8 +5,9 @@ import {
   GroupRole,
   GroupSignatory,
   SignatoryRole,
+  TransactionStatus,
 } from '../../../shared/contracts';
-import { groupMembers, groups, users } from '../data/store';
+import { approvals, groupMembers, groups, messages, transactions, users } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
 
 const MAX_SIGNATORIES = 3;
@@ -92,6 +93,30 @@ const clampApprovalThreshold = (group: Group): void => {
   if (group.approvalThreshold > signatoryCount) {
     group.approvalThreshold = signatoryCount;
   }
+};
+
+const removeById = <T extends { id: string }>(items: T[], id: string): void => {
+  const index = items.findIndex((item) => item.id === id);
+
+  if (index >= 0) {
+    items.splice(index, 1);
+  }
+};
+
+const hasPendingApprovalRisk = (groupId: string, userId: string): boolean => {
+  return transactions.some((transaction) => {
+    if (transaction.groupId !== groupId || transaction.status !== TransactionStatus.PENDING_APPROVAL) {
+      return false;
+    }
+
+    if (transaction.initiatedByUserId === userId) {
+      return true;
+    }
+
+    return approvals.some(
+      (approval) => approval.transactionId === transaction.id && approval.signatoryUserId === userId,
+    );
+  });
 };
 
 export const createGroup = (
@@ -226,4 +251,81 @@ export const revokeMember = (
   clampApprovalThreshold(group);
 
   return member;
+};
+
+export const leaveGroup = (
+  groupId: string,
+  memberId: string,
+  requesterUserId: string,
+): GroupMember => {
+  const group = getGroupOrThrow(groupId);
+  const member = getMemberOrThrow(groupId, memberId);
+
+  if (member.userId !== requesterUserId) {
+    throw createHttpError(403, 'Users can only leave a group for themselves');
+  }
+
+  if (member.userId === group.createdByUserId || member.signatoryRole === 'primary') {
+    throw createHttpError(409, 'Creator cannot leave group');
+  }
+
+  if (member.signatoryRole === 'secondary' || member.signatoryRole === 'tertiary') {
+    throw createHttpError(409, 'Signatory must transfer role before leaving');
+  }
+
+  if (hasPendingApprovalRisk(groupId, requesterUserId)) {
+    throw createHttpError(409, 'Cannot leave group with pending approvals on transactions');
+  }
+
+  removeById(groupMembers, member.id);
+
+  return member;
+};
+
+export const deleteGroup = (groupId: string, requesterUserId: string): string => {
+  const group = getGroupOrThrow(groupId);
+
+  if (group.createdByUserId !== requesterUserId) {
+    throw createHttpError(403, 'Only the creator can delete this group');
+  }
+
+  const groupTransactions = transactions.filter((item) => item.groupId === groupId);
+
+  if (groupTransactions.some((item) => item.status === TransactionStatus.PENDING_APPROVAL)) {
+    throw createHttpError(409, 'Cannot delete group with pending transactions');
+  }
+
+  if (groupTransactions.some((item) => item.status !== TransactionStatus.COMPLETED)) {
+    throw createHttpError(409, 'Cannot delete group with active funds in system');
+  }
+
+  const groupTransactionIds = new Set(groupTransactions.map((item) => item.id));
+
+  for (let index = approvals.length - 1; index >= 0; index -= 1) {
+    if (groupTransactionIds.has(approvals[index].transactionId)) {
+      approvals.splice(index, 1);
+    }
+  }
+
+  for (let index = transactions.length - 1; index >= 0; index -= 1) {
+    if (transactions[index].groupId === groupId) {
+      transactions.splice(index, 1);
+    }
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].groupId === groupId) {
+      messages.splice(index, 1);
+    }
+  }
+
+  for (let index = groupMembers.length - 1; index >= 0; index -= 1) {
+    if (groupMembers[index].groupId === groupId) {
+      groupMembers.splice(index, 1);
+    }
+  }
+
+  removeById(groups, group.id);
+
+  return group.id;
 };
