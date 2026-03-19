@@ -21,7 +21,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.use('/', authRouter);
+app.use('/auth', authRouter);
 app.use('/groups', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);

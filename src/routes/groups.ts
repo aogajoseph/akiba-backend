@@ -8,7 +8,6 @@ import {
   Group,
   GroupMember,
   GroupRole,
-  JoinGroupRequestDto,
   JoinGroupResponseDto,
   ListGroupMembersResponseDto,
   ListGroupsResponseDto,
@@ -143,14 +142,6 @@ router.post('/:groupId/join', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
-    const body = getObjectBody(req.body);
-    const dto: JoinGroupRequestDto = {
-      groupId: ensureNonEmptyString(body.groupId, 'groupId is required'),
-    };
-
-    if (dto.groupId !== group.id) {
-      throw createHttpError(400, 'groupId in body must match the route parameter');
-    }
 
     const existingMembership = groupMembers.find(
       (item) => item.groupId === group.id && item.userId === user.id,
