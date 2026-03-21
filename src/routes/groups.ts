@@ -16,6 +16,7 @@ import {
   PromoteGroupMemberResponseDto,
   RevokeGroupMemberResponseDto,
   SpaceAdmin,
+  SpaceMember,
   User,
 } from '../../../shared/contracts';
 import { groupMembers, groups, users } from '../data/store';
@@ -75,6 +76,28 @@ const toAdmin = (item: { userId: string; name: string }): SpaceAdmin => {
     userId: item.userId,
     name: item.name,
     role: 'admin',
+  };
+};
+
+const toSpaceMember = (member: GroupMember): SpaceMember => {
+  const user = users.find((item) => item.id === member.userId);
+
+  return {
+    ...member,
+    name: user?.name ?? member.userId,
+  };
+};
+
+const buildAdminsResponse = (groupId: string, userId: string): ApiResponse<ListGroupSignatoriesResponseDto> => {
+  const report = getSignatoryReport(groupId, userId);
+  const admins = report.signatories.map(toAdmin);
+
+  return {
+    data: {
+      admins,
+      remainingSlots: report.remainingSlots,
+      signatories: admins,
+    },
   };
 };
 
@@ -148,12 +171,11 @@ router.get('/:groupId', (req, res, next) => {
 router.delete('/:groupId', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
-    const groupId = deleteGroup(req.params.groupId, user.id);
+    deleteGroup(req.params.groupId, user.id);
 
     const response: ApiResponse<DeleteGroupResponseDto> = {
       data: {
-        groupId,
-        spaceId: groupId,
+        success: true,
       },
     };
 
@@ -213,7 +235,9 @@ router.get('/:groupId/members', (req, res, next) => {
     const group = getGroupById(req.params.groupId);
     requireMembership(group.id, user.id);
 
-    const members = groupMembers.filter((item) => item.groupId === group.id);
+    const members = groupMembers
+      .filter((item) => item.groupId === group.id)
+      .map(toSpaceMember);
     const response: ApiResponse<ListGroupMembersResponseDto> = {
       data: {
         members,
@@ -229,18 +253,16 @@ router.get('/:groupId/members', (req, res, next) => {
 router.get('/:groupId/signatories', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
-    const report = getSignatoryReport(req.params.groupId, user.id);
-    const admins = report.signatories.map(toAdmin);
+    res.json(buildAdminsResponse(req.params.groupId, user.id));
+  } catch (error) {
+    next(error);
+  }
+});
 
-    const response: ApiResponse<ListGroupSignatoriesResponseDto> = {
-      data: {
-        admins,
-        remainingSlots: report.remainingSlots,
-        signatories: admins,
-      },
-    };
-
-    res.json(response);
+router.get('/:groupId/admins', (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    res.json(buildAdminsResponse(req.params.groupId, user.id));
   } catch (error) {
     next(error);
   }
@@ -281,3 +303,4 @@ router.post('/:groupId/members/:memberId/revoke', (req, res, next) => {
 });
 
 export default router;
+

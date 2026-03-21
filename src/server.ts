@@ -29,6 +29,7 @@ app.use('/spaces', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);
 app.use('/groups/:groupId/messages', messagesRouter);
+app.use('/spaces/:groupId/messages', messagesRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
@@ -39,3 +40,4 @@ app.use(errorHandler);
 app.listen(port, () => {
   console.log(`Akiba backend listening on port ${port}`);
 });
+
