@@ -1,0 +1,227 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const store_1 = require("../data/store");
+const http_1 = require("../utils/http");
+const groupService_1 = require("../services/groupService");
+const router = (0, express_1.Router)();
+const getCurrentUser = (headerValue) => {
+    const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
+    const user = store_1.users.find((item) => item.id === userId);
+    if (!user) {
+        throw (0, http_1.createHttpError)(404, 'User not found');
+    }
+    return user;
+};
+const getGroupById = (groupId) => {
+    const group = store_1.groups.find((item) => item.id === groupId);
+    if (!group) {
+        throw (0, http_1.createHttpError)(404, 'Group not found');
+    }
+    return group;
+};
+const requireMembership = (groupId, userId) => {
+    const membership = store_1.groupMembers.find((item) => item.groupId === groupId && item.userId === userId);
+    if (!membership) {
+        throw (0, http_1.createHttpError)(403, 'You are not a member of this group');
+    }
+    return membership;
+};
+const toAdmin = (item) => {
+    return {
+        userId: item.userId,
+        name: item.name,
+        role: 'admin',
+    };
+};
+const toSpaceMember = (member) => {
+    const user = store_1.users.find((item) => item.id === member.userId);
+    return {
+        ...member,
+        name: user?.name ?? member.userId,
+    };
+};
+const buildAdminsResponse = (groupId, userId) => {
+    const report = (0, groupService_1.getSignatoryReport)(groupId, userId);
+    const admins = report.signatories.map(toAdmin);
+    return {
+        data: {
+            admins,
+            remainingSlots: report.remainingSlots,
+            signatories: admins,
+        },
+    };
+};
+router.post('/', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const body = (0, http_1.getObjectBody)(req.body);
+        const dto = {
+            name: (0, http_1.ensureNonEmptyString)(body.name, 'name is required'),
+            approvalThreshold: (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer'),
+        };
+        const { group } = (0, groupService_1.createGroup)(user.id, dto);
+        const response = {
+            data: {
+                group,
+                space: group,
+            },
+        };
+        res.status(201).json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const memberships = store_1.groupMembers.filter((item) => item.userId === user.id);
+        const visibleGroups = store_1.groups.filter((group) => memberships.some((membership) => membership.groupId === group.id));
+        const response = {
+            data: {
+                groups: visibleGroups,
+                spaces: visibleGroups,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/:groupId', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const group = getGroupById(req.params.groupId);
+        requireMembership(group.id, user.id);
+        const response = {
+            data: {
+                group,
+                space: group,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.delete('/:groupId', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        (0, groupService_1.deleteGroup)(req.params.groupId, user.id);
+        const response = {
+            data: {
+                success: true,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/:groupId/join', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const group = getGroupById(req.params.groupId);
+        const existingMembership = store_1.groupMembers.find((item) => item.groupId === group.id && item.userId === user.id);
+        if (existingMembership) {
+            throw (0, http_1.createHttpError)(409, 'User is already a member of this group');
+        }
+        const member = (0, groupService_1.joinGroup)(group.id, user.id);
+        const response = {
+            data: {
+                member,
+            },
+        };
+        res.status(201).json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.delete('/:groupId/members/:memberId/leave', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const member = (0, groupService_1.leaveGroup)(req.params.groupId, req.params.memberId, user.id);
+        const response = {
+            data: {
+                member,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/:groupId/members', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const group = getGroupById(req.params.groupId);
+        requireMembership(group.id, user.id);
+        const members = store_1.groupMembers
+            .filter((item) => item.groupId === group.id)
+            .map(toSpaceMember);
+        const response = {
+            data: {
+                members,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/:groupId/signatories', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        res.json(buildAdminsResponse(req.params.groupId, user.id));
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/:groupId/admins', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        res.json(buildAdminsResponse(req.params.groupId, user.id));
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/:groupId/members/:memberId/promote', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const member = (0, groupService_1.promoteMember)(req.params.groupId, req.params.memberId, user.id);
+        const response = {
+            data: {
+                member,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/:groupId/members/:memberId/revoke', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const member = (0, groupService_1.revokeMember)(req.params.groupId, req.params.memberId, user.id);
+        const response = {
+            data: {
+                member,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.default = router;

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 
 import {
   ApiResponse,
@@ -25,6 +25,11 @@ import { getTransaction } from '../services/transactionService';
 import { createApproval, listApprovals } from '../services/approvalService';
 
 const router = Router({ mergeParams: true });
+
+type ApprovalParams = {
+  groupId: string;
+  transactionId: string;
+};
 
 const getCurrentUser = (headerValue: string | undefined): User => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
@@ -79,7 +84,7 @@ const requireTransactionInGroup = (groupId: string, transactionId: string): Tran
   return transaction;
 };
 
-router.get('/', (req, res, next) => {
+router.get('/', (req: Request<ApprovalParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));
@@ -103,7 +108,7 @@ router.get('/', (req, res, next) => {
   }
 });
 
-router.post('/', (req, res, next) => {
+router.post('/', (req: Request<ApprovalParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));

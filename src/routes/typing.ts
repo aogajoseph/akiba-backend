@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 
 import {
   ApiResponse,
@@ -11,6 +11,11 @@ import { groupMembers, groups, typingUsers, users } from '../data/store';
 import { createHttpError, ensureNonEmptyString } from '../utils/http';
 
 const router = Router({ mergeParams: true });
+
+type TypingParams = {
+  groupId?: string;
+  spaceId?: string;
+};
 
 const getCurrentUser = (headerValue: string | undefined): User => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
@@ -57,7 +62,7 @@ const getTypingSet = (spaceId: string): Set<string> => {
   return typingUsers[spaceId];
 };
 
-router.get('/', (req, res, next) => {
+router.get('/', (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = getCurrentUser(req.header('x-user-id'));
@@ -89,7 +94,7 @@ router.get('/', (req, res, next) => {
   }
 });
 
-router.post('/start', (req, res, next) => {
+router.post('/start', (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = getCurrentUser(req.header('x-user-id'));
@@ -104,7 +109,7 @@ router.post('/start', (req, res, next) => {
   }
 });
 
-router.post('/stop', (req, res, next) => {
+router.post('/stop', (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = getCurrentUser(req.header('x-user-id'));

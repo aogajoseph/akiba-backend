@@ -27,8 +27,8 @@ router.post('/register', (req, res, next) => {
   try {
     const body = getObjectBody(req.body);
     const dto: RegisterRequestDto = {
-      name: ensureNonEmptyString(body.name, 'name is required'),
-      phoneNumber: ensureNonEmptyString(body.phoneNumber, 'phoneNumber is required'),
+      name: ensureNonEmptyString(body.name, 'Name is required'),
+      phoneNumber: ensureNonEmptyString(body.phoneNumber, 'Phone Number is required'),
     };
 
     const existingUser = users.find((item) => item.phoneNumber === dto.phoneNumber);
@@ -62,7 +62,7 @@ router.post('/login', (req, res, next) => {
   try {
     const body = getObjectBody(req.body);
     const dto: LoginRequestDto = {
-      phoneNumber: ensureNonEmptyString(body.phoneNumber, 'phoneNumber is required'),
+      phoneNumber: ensureNonEmptyString(body.phoneNumber, 'Phone Number is required'),
     };
 
     const user = users.find((item) => item.phoneNumber === dto.phoneNumber);

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 
 import {
   ApiResponse,
@@ -28,6 +28,15 @@ import {
 } from '../services/transactionService';
 
 const router = Router({ mergeParams: true });
+
+type GroupParams = {
+  groupId: string;
+};
+
+type TransactionParams = {
+  groupId: string;
+  transactionId: string;
+};
 
 const getCurrentUser = (headerValue: string | undefined): User => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
@@ -95,7 +104,7 @@ const requireTransaction = (groupId: string, transactionId: string): Transaction
   return transaction;
 };
 
-router.post('/deposits', (req, res, next) => {
+router.post('/deposits', (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));
@@ -116,7 +125,7 @@ router.post('/deposits', (req, res, next) => {
   }
 });
 
-router.post('/withdrawals', (req, res, next) => {
+router.post('/withdrawals', (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));
@@ -137,7 +146,7 @@ router.post('/withdrawals', (req, res, next) => {
   }
 });
 
-router.get('/', (req, res, next) => {
+router.get('/', (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));
@@ -156,7 +165,7 @@ router.get('/', (req, res, next) => {
   }
 });
 
-router.get('/:transactionId', (req, res, next) => {
+router.get('/:transactionId', (req: Request<TransactionParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));

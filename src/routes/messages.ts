@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 
 import {
   ApiResponse,
@@ -9,6 +9,8 @@ import {
   GroupMember,
   ListMessagesResponseDto,
   Message,
+  ToggleMessageReactionRequestDto,
+  ToggleMessageReactionResponseDto,
   User,
 } from '../../../shared/contracts';
 import { groupMembers, groups, messages, users } from '../data/store';
@@ -21,6 +23,15 @@ import {
 } from '../utils/http';
 
 const router = Router({ mergeParams: true });
+
+type GroupParams = {
+  groupId: string;
+};
+
+type MessageParams = {
+  groupId: string;
+  messageId: string;
+};
 
 const getCurrentUser = (headerValue: string | undefined): User => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
@@ -55,7 +66,7 @@ const requireMembership = (groupId: string, userId: string): GroupMember => {
   return membership;
 };
 
-router.get('/', (req, res, next) => {
+router.get('/', (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));
@@ -68,6 +79,7 @@ router.get('/', (req, res, next) => {
           .filter((item) => item.groupId === groupId)
           .map((item) => ({
             ...item,
+            reactions: item.reactions ?? [],
             status: item.status ?? 'sent',
           })),
       },
@@ -79,7 +91,7 @@ router.get('/', (req, res, next) => {
   }
 });
 
-router.post('/', (req, res, next) => {
+router.post('/', (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));
@@ -107,6 +119,7 @@ router.post('/', (req, res, next) => {
       senderUserId: user.id,
       text: dto.text,
       replyToMessageId: dto.replyToMessageId,
+      reactions: [],
       status: 'sent',
       createdAt: new Date().toISOString(),
     };
@@ -125,7 +138,54 @@ router.post('/', (req, res, next) => {
   }
 });
 
-router.delete('/:messageId', (req, res, next) => {
+router.post('/:messageId/reactions', (req: Request<MessageParams>, res, next) => {
+  try {
+    const { groupId, messageId } = req.params;
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+
+    const body = getObjectBody(req.body);
+    const dto: ToggleMessageReactionRequestDto = {
+      emoji: ensureNonEmptyString(body.emoji, 'emoji is required'),
+    };
+
+    const message = messages.find((item) => item.groupId === groupId && item.id === messageId);
+
+    if (!message) {
+      throw createHttpError(404, 'Message not found');
+    }
+
+    message.reactions = message.reactions ?? [];
+
+    const reaction = message.reactions.find((item) => item.emoji === dto.emoji);
+
+    if (reaction?.userIds.includes(user.id)) {
+      reaction.userIds = reaction.userIds.filter((userId) => userId !== user.id);
+    } else if (reaction) {
+      reaction.userIds.push(user.id);
+    } else {
+      message.reactions.push({
+        emoji: dto.emoji,
+        userIds: [user.id],
+      });
+    }
+
+    message.reactions = message.reactions.filter((item) => item.userIds.length > 0);
+
+    const response: ApiResponse<ToggleMessageReactionResponseDto> = {
+      data: {
+        message,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:messageId', (req: Request<MessageParams>, res, next) => {
   try {
     const { groupId, messageId } = req.params;
     const user = getCurrentUser(req.header('x-user-id'));

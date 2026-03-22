@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 
 import {
   ApiResponse,
@@ -37,6 +37,15 @@ import {
 } from '../services/groupService';
 
 const router = Router();
+
+type GroupParams = {
+  groupId: string;
+};
+
+type GroupMemberParams = {
+  groupId: string;
+  memberId: string;
+};
 
 const getCurrentUser = (headerValue: string | undefined): User => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
@@ -149,7 +158,7 @@ router.get('/', (req, res, next) => {
   }
 });
 
-router.get('/:groupId', (req, res, next) => {
+router.get('/:groupId', (req: Request<GroupParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
@@ -168,7 +177,7 @@ router.get('/:groupId', (req, res, next) => {
   }
 });
 
-router.delete('/:groupId', (req, res, next) => {
+router.delete('/:groupId', (req: Request<GroupParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     deleteGroup(req.params.groupId, user.id);
@@ -185,7 +194,7 @@ router.delete('/:groupId', (req, res, next) => {
   }
 });
 
-router.post('/:groupId/join', (req, res, next) => {
+router.post('/:groupId/join', (req: Request<GroupParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
@@ -212,7 +221,7 @@ router.post('/:groupId/join', (req, res, next) => {
   }
 });
 
-router.delete('/:groupId/members/:memberId/leave', (req, res, next) => {
+router.delete('/:groupId/members/:memberId/leave', (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const member = leaveGroup(req.params.groupId, req.params.memberId, user.id);
@@ -229,7 +238,7 @@ router.delete('/:groupId/members/:memberId/leave', (req, res, next) => {
   }
 });
 
-router.get('/:groupId/members', (req, res, next) => {
+router.get('/:groupId/members', (req: Request<GroupParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
@@ -250,7 +259,7 @@ router.get('/:groupId/members', (req, res, next) => {
   }
 });
 
-router.get('/:groupId/signatories', (req, res, next) => {
+router.get('/:groupId/signatories', (req: Request<GroupParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     res.json(buildAdminsResponse(req.params.groupId, user.id));
@@ -259,7 +268,7 @@ router.get('/:groupId/signatories', (req, res, next) => {
   }
 });
 
-router.get('/:groupId/admins', (req, res, next) => {
+router.get('/:groupId/admins', (req: Request<GroupParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     res.json(buildAdminsResponse(req.params.groupId, user.id));
@@ -268,7 +277,7 @@ router.get('/:groupId/admins', (req, res, next) => {
   }
 });
 
-router.post('/:groupId/members/:memberId/promote', (req, res, next) => {
+router.post('/:groupId/members/:memberId/promote', (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const member = promoteMember(req.params.groupId, req.params.memberId, user.id);
@@ -285,7 +294,7 @@ router.post('/:groupId/members/:memberId/promote', (req, res, next) => {
   }
 });
 
-router.post('/:groupId/members/:memberId/revoke', (req, res, next) => {
+router.post('/:groupId/members/:memberId/revoke', (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const member = revokeMember(req.params.groupId, req.params.memberId, user.id);
