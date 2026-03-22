@@ -10,6 +10,7 @@ const approvals_1 = __importDefault(require("./routes/approvals"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const groups_1 = __importDefault(require("./routes/groups"));
 const messages_1 = __importDefault(require("./routes/messages"));
+const typing_1 = __importDefault(require("./routes/typing"));
 const transactions_1 = __importDefault(require("./routes/transactions"));
 const users_1 = __importDefault(require("./routes/users"));
 const http_1 = require("./utils/http");
@@ -29,6 +30,8 @@ app.use('/groups/:groupId/transactions', transactions_1.default);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvals_1.default);
 app.use('/groups/:groupId/messages', messages_1.default);
 app.use('/spaces/:groupId/messages', messages_1.default);
+app.use('/groups/:groupId/typing', typing_1.default);
+app.use('/spaces/:spaceId/typing', typing_1.default);
 app.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
 });

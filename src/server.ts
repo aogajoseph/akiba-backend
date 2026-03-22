@@ -6,6 +6,7 @@ import approvalsRouter from './routes/approvals';
 import authRouter from './routes/auth';
 import groupsRouter from './routes/groups';
 import messagesRouter from './routes/messages';
+import typingRouter from './routes/typing';
 import transactionsRouter from './routes/transactions';
 import usersRouter from './routes/users';
 import { errorHandler } from './utils/http';
@@ -30,6 +31,8 @@ app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);
 app.use('/groups/:groupId/messages', messagesRouter);
 app.use('/spaces/:groupId/messages', messagesRouter);
+app.use('/groups/:groupId/typing', typingRouter);
+app.use('/spaces/:spaceId/typing', typingRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });

@@ -13,3 +13,4 @@ export const groupMembers: GroupMember[] = [];
 export const transactions: Transaction[] = [];
 export const approvals: Approval[] = [];
 export const messages: Message[] = [];
+export const typingUsers: Record<string, Set<string>> = {};
