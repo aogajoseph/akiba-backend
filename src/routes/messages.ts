@@ -4,6 +4,7 @@ import {
   ApiResponse,
   CreateMessageRequestDto,
   CreateMessageResponseDto,
+  DeleteMessageResponseDto,
   Group,
   GroupMember,
   ListMessagesResponseDto,
@@ -100,6 +101,39 @@ router.post('/', (req, res, next) => {
     };
 
     res.status(201).json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:messageId', (req, res, next) => {
+  try {
+    const { groupId, messageId } = req.params;
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+
+    const messageIndex = messages.findIndex(
+      (item) => item.groupId === groupId && item.id === messageId,
+    );
+
+    if (messageIndex < 0) {
+      throw createHttpError(404, 'Message not found');
+    }
+
+    if (messages[messageIndex].senderUserId !== user.id) {
+      throw createHttpError(403, 'You can only delete your own messages');
+    }
+
+    messages.splice(messageIndex, 1);
+
+    const response: ApiResponse<DeleteMessageResponseDto> = {
+      data: {
+        success: true,
+      },
+    };
+
+    res.json(response);
   } catch (error) {
     next(error);
   }
