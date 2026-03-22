@@ -16,6 +16,7 @@ import {
   createHttpError,
   createId,
   ensureNonEmptyString,
+  ensureOptionalNonEmptyString,
   getObjectBody,
 } from '../utils/http';
 
@@ -87,13 +88,25 @@ router.post('/', (req, res, next) => {
     const body = getObjectBody(req.body);
     const dto: CreateMessageRequestDto = {
       text: ensureNonEmptyString(body.text, 'text is required'),
+      replyToMessageId: ensureOptionalNonEmptyString(
+        body.replyToMessageId,
+        'replyToMessageId must be a non-empty string',
+      ),
     };
+
+    if (
+      dto.replyToMessageId &&
+      !messages.some((item) => item.groupId === groupId && item.id === dto.replyToMessageId)
+    ) {
+      throw createHttpError(404, 'Reply target message not found');
+    }
 
     const message: Message = {
       id: createId('message'),
       groupId,
       senderUserId: user.id,
       text: dto.text,
+      replyToMessageId: dto.replyToMessageId,
       status: 'sent',
       createdAt: new Date().toISOString(),
     };

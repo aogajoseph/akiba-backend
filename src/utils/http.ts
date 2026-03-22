@@ -30,6 +30,17 @@ export const ensureNonEmptyString = (value: unknown, message: string): string =>
   return value.trim();
 };
 
+export const ensureOptionalNonEmptyString = (
+  value: unknown,
+  message: string,
+): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return ensureNonEmptyString(value, message);
+};
+
 export const ensurePositiveNumber = (value: unknown, message: string): number => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     throw createHttpError(400, message);
