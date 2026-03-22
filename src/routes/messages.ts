@@ -11,6 +11,7 @@ import {
   Message,
   ToggleMessageReactionRequestDto,
   ToggleMessageReactionResponseDto,
+  UploadMediaMessageResponseDto,
   User,
 } from '../../../shared/contracts';
 import { groupMembers, groups, messages, users } from '../data/store';
@@ -21,6 +22,7 @@ import {
   ensureOptionalNonEmptyString,
   getObjectBody,
 } from '../utils/http';
+import { parseMultipartFormData, storeMediaFiles } from '../utils/media';
 
 const router = Router({ mergeParams: true });
 
@@ -127,6 +129,52 @@ router.post('/', (req: Request<GroupParams>, res, next) => {
     messages.push(message);
 
     const response: ApiResponse<CreateMessageResponseDto> = {
+      data: {
+        message,
+      },
+    };
+
+    res.status(201).json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/media', async (req: Request<GroupParams>, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+
+    const { fields, files } = await parseMultipartFormData(req);
+    const text = ensureOptionalNonEmptyString(fields.text, 'text must be a non-empty string');
+    const replyToMessageId = ensureOptionalNonEmptyString(
+      fields.replyToMessageId,
+      'replyToMessageId must be a non-empty string',
+    );
+
+    if (replyToMessageId && !messages.some((item) => item.groupId === groupId && item.id === replyToMessageId)) {
+      throw createHttpError(404, 'Reply target message not found');
+    }
+
+    const media = await storeMediaFiles(req, files.filter((file) => file.fieldName === 'file'));
+
+    const message: Message = {
+      id: createId('message'),
+      groupId,
+      senderUserId: user.id,
+      text: text ?? '',
+      replyToMessageId,
+      media,
+      reactions: [],
+      status: 'sent',
+      createdAt: new Date().toISOString(),
+    };
+
+    messages.push(message);
+
+    const response: ApiResponse<UploadMediaMessageResponseDto> = {
       data: {
         message,
       },

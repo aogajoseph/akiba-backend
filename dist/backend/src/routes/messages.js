@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
+const media_1 = require("../utils/media");
 const router = (0, express_1.Router)({ mergeParams: true });
 const getCurrentUser = (headerValue) => {
     const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
@@ -70,6 +71,42 @@ router.post('/', (req, res, next) => {
             senderUserId: user.id,
             text: dto.text,
             replyToMessageId: dto.replyToMessageId,
+            reactions: [],
+            status: 'sent',
+            createdAt: new Date().toISOString(),
+        };
+        store_1.messages.push(message);
+        const response = {
+            data: {
+                message,
+            },
+        };
+        res.status(201).json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/media', async (req, res, next) => {
+    try {
+        const { groupId } = req.params;
+        const user = getCurrentUser(req.header('x-user-id'));
+        getGroupById(groupId);
+        requireMembership(groupId, user.id);
+        const { fields, files } = await (0, media_1.parseMultipartFormData)(req);
+        const text = (0, http_1.ensureOptionalNonEmptyString)(fields.text, 'text must be a non-empty string');
+        const replyToMessageId = (0, http_1.ensureOptionalNonEmptyString)(fields.replyToMessageId, 'replyToMessageId must be a non-empty string');
+        if (replyToMessageId && !store_1.messages.some((item) => item.groupId === groupId && item.id === replyToMessageId)) {
+            throw (0, http_1.createHttpError)(404, 'Reply target message not found');
+        }
+        const media = await (0, media_1.storeMediaFiles)(req, files.filter((file) => file.fieldName === 'file'));
+        const message = {
+            id: (0, http_1.createId)('message'),
+            groupId,
+            senderUserId: user.id,
+            text: text ?? '',
+            replyToMessageId,
+            media,
             reactions: [],
             status: 'sent',
             createdAt: new Date().toISOString(),
