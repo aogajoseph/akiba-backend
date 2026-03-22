@@ -63,7 +63,12 @@ router.get('/', (req, res, next) => {
 
     const response: ApiResponse<ListMessagesResponseDto> = {
       data: {
-        messages: messages.filter((item) => item.groupId === groupId),
+        messages: messages
+          .filter((item) => item.groupId === groupId)
+          .map((item) => ({
+            ...item,
+            status: item.status ?? 'sent',
+          })),
       },
     };
 
@@ -89,6 +94,7 @@ router.post('/', (req, res, next) => {
       groupId,
       senderUserId: user.id,
       text: dto.text,
+      status: 'sent',
       createdAt: new Date().toISOString(),
     };
 
