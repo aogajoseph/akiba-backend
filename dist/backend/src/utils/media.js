@@ -64,41 +64,56 @@ const parseMultipartFormData = async (req) => {
         req.on('error', reject);
     });
     const rawBody = Buffer.concat(chunks);
-    const rawBodyText = rawBody.toString('latin1');
-    const parts = rawBodyText
-        .split(`--${boundary}`)
-        .slice(1, -1)
-        .map((part) => part.replace(/^\r\n/, '').replace(/\r\n$/, ''))
-        .filter((part) => part.length > 0);
+    const boundaryBuffer = Buffer.from(`--${boundary}`);
+    const headerSeparatorBuffer = Buffer.from('\r\n\r\n');
     const fields = {};
     const files = [];
-    for (const part of parts) {
-        const separatorIndex = part.indexOf('\r\n\r\n');
+    let cursor = rawBody.indexOf(boundaryBuffer);
+    while (cursor >= 0) {
+        let partStart = cursor + boundaryBuffer.length;
+        if (rawBody.subarray(partStart, partStart + 2).equals(Buffer.from('--'))) {
+            break;
+        }
+        if (rawBody.subarray(partStart, partStart + 2).equals(Buffer.from('\r\n'))) {
+            partStart += 2;
+        }
+        const nextBoundaryIndex = rawBody.indexOf(boundaryBuffer, partStart);
+        if (nextBoundaryIndex < 0) {
+            break;
+        }
+        const partEnd = rawBody.subarray(nextBoundaryIndex - 2, nextBoundaryIndex).equals(Buffer.from('\r\n'))
+            ? nextBoundaryIndex - 2
+            : nextBoundaryIndex;
+        const partBuffer = rawBody.subarray(partStart, partEnd);
+        const separatorIndex = partBuffer.indexOf(headerSeparatorBuffer);
         if (separatorIndex < 0) {
+            cursor = nextBoundaryIndex;
             continue;
         }
-        const headerText = part.slice(0, separatorIndex);
-        const bodyText = part.slice(separatorIndex + 4);
+        const headerText = partBuffer.subarray(0, separatorIndex).toString('utf8');
+        const bodyBuffer = partBuffer.subarray(separatorIndex + headerSeparatorBuffer.length);
         const headers = headerText.split('\r\n');
         const contentDisposition = headers.find((header) => header.toLowerCase().startsWith('content-disposition:'));
         if (!contentDisposition) {
+            cursor = nextBoundaryIndex;
             continue;
         }
         const { fieldName, fileName } = parseContentDisposition(contentDisposition);
         const contentTypeHeader = headers.find((header) => header.toLowerCase().startsWith('content-type:'));
         const mimeType = contentTypeHeader?.split(':')[1]?.trim() ?? 'application/octet-stream';
         if (fileName && fileName.trim().length > 0) {
-            const buffer = Buffer.from(bodyText, 'latin1');
             files.push({
-                buffer,
+                buffer: bodyBuffer,
                 fileName: fileName.trim(),
                 fieldName,
                 mimeType,
-                size: buffer.length,
+                size: bodyBuffer.length,
             });
+            cursor = nextBoundaryIndex;
             continue;
         }
-        fields[fieldName] = bodyText;
+        fields[fieldName] = bodyBuffer.toString('utf8');
+        cursor = nextBoundaryIndex;
     }
     return { fields, files };
 };
