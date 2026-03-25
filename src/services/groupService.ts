@@ -130,6 +130,8 @@ export const createGroup = (
   const group: Group = {
     id: createId('group'),
     name: dto.name,
+    description: dto.description,
+    imageUrl: dto.image,
     createdByUserId: userId,
     approvalThreshold: dto.approvalThreshold,
     createdAt: new Date().toISOString(),

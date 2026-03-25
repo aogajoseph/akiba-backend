@@ -58,6 +58,8 @@ router.post('/', (req, res, next) => {
         const body = (0, http_1.getObjectBody)(req.body);
         const dto = {
             name: (0, http_1.ensureNonEmptyString)(body.name, 'name is required'),
+            description: (0, http_1.ensureOptionalNonEmptyString)(body.description, 'description must be a non-empty string'),
+            image: (0, http_1.ensureOptionalNonEmptyString)(body.image, 'image must be a non-empty string'),
             approvalThreshold: (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer'),
         };
         const { group } = (0, groupService_1.createGroup)(user.id, dto);

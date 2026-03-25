@@ -23,6 +23,7 @@ import { groupMembers, groups, users } from '../data/store';
 import {
   createHttpError,
   ensureNonEmptyString,
+  ensureOptionalNonEmptyString,
   ensurePositiveInteger,
   getObjectBody,
 } from '../utils/http';
@@ -116,6 +117,14 @@ router.post('/', (req, res, next) => {
     const body = getObjectBody(req.body);
     const dto: CreateGroupRequestDto = {
       name: ensureNonEmptyString(body.name, 'name is required'),
+      description: ensureOptionalNonEmptyString(
+        body.description,
+        'description must be a non-empty string',
+      ),
+      image: ensureOptionalNonEmptyString(
+        body.image,
+        'image must be a non-empty string',
+      ),
       approvalThreshold: ensurePositiveInteger(
         body.approvalThreshold,
         'approvalThreshold must be a positive integer',

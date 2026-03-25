@@ -90,6 +90,8 @@ const createGroup = (userId, dto) => {
     const group = {
         id: (0, http_1.createId)('group'),
         name: dto.name,
+        description: dto.description,
+        imageUrl: dto.image,
         createdByUserId: userId,
         approvalThreshold: dto.approvalThreshold,
         createdAt: new Date().toISOString(),
