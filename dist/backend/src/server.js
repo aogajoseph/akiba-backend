@@ -6,7 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const express_1 = __importDefault(require("express"));
+const http_1 = __importDefault(require("http"));
 const path_1 = __importDefault(require("path"));
+const socket_io_1 = require("socket.io");
 const approvals_1 = __importDefault(require("./routes/approvals"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const groups_1 = __importDefault(require("./routes/groups"));
@@ -14,10 +16,79 @@ const messages_1 = __importDefault(require("./routes/messages"));
 const typing_1 = __importDefault(require("./routes/typing"));
 const transactions_1 = __importDefault(require("./routes/transactions"));
 const users_1 = __importDefault(require("./routes/users"));
-const http_1 = require("./utils/http");
+const http_2 = require("./utils/http");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const port = Number(process.env.PORT ?? 4000);
+const httpServer = http_1.default.createServer(app);
+const io = new socket_io_1.Server(httpServer, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST'],
+    },
+});
+const spacePresence = new Map();
+const socketPresence = new Map();
+const spaceUserConnectionCounts = new Map();
+const getPresenceKey = (spaceId, userId) => `${spaceId}:${userId}`;
+const emitPresenceUpdate = (spaceId) => {
+    io.to(spaceId).emit('presence_update', {
+        spaceId,
+        onlineCount: spacePresence.get(spaceId)?.size ?? 0,
+    });
+};
+const removeSocketPresence = (socketId) => {
+    const presence = socketPresence.get(socketId);
+    if (!presence) {
+        return;
+    }
+    socketPresence.delete(socketId);
+    const presenceKey = getPresenceKey(presence.spaceId, presence.userId);
+    const currentCount = spaceUserConnectionCounts.get(presenceKey) ?? 0;
+    if (currentCount <= 1) {
+        spaceUserConnectionCounts.delete(presenceKey);
+        const users = spacePresence.get(presence.spaceId);
+        if (users) {
+            users.delete(presence.userId);
+            if (users.size === 0) {
+                spacePresence.delete(presence.spaceId);
+            }
+        }
+    }
+    else {
+        spaceUserConnectionCounts.set(presenceKey, currentCount - 1);
+    }
+    emitPresenceUpdate(presence.spaceId);
+};
+io.on('connection', (socket) => {
+    socket.on('join_space', (payload) => {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId.trim() : '';
+        const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
+        if (!spaceId || !userId) {
+            return;
+        }
+        const previousPresence = socketPresence.get(socket.id);
+        if (previousPresence) {
+            socket.leave(previousPresence.spaceId);
+            removeSocketPresence(socket.id);
+        }
+        socket.join(spaceId);
+        socketPresence.set(socket.id, { spaceId, userId });
+        const presenceKey = getPresenceKey(spaceId, userId);
+        const currentCount = spaceUserConnectionCounts.get(presenceKey) ?? 0;
+        spaceUserConnectionCounts.set(presenceKey, currentCount + 1);
+        let users = spacePresence.get(spaceId);
+        if (!users) {
+            users = new Set();
+            spacePresence.set(spaceId, users);
+        }
+        users.add(userId);
+        emitPresenceUpdate(spaceId);
+    });
+    socket.on('disconnect', () => {
+        removeSocketPresence(socket.id);
+    });
+});
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 app.use('/media', express_1.default.static(path_1.default.join(process.cwd(), 'uploads')));
@@ -37,7 +108,7 @@ app.use('/spaces/:spaceId/typing', typing_1.default);
 app.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
 });
-app.use(http_1.errorHandler);
-app.listen(port, () => {
+app.use(http_2.errorHandler);
+httpServer.listen(port, () => {
     console.log(`Akiba backend listening on port ${port}`);
 });

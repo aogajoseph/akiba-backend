@@ -1,7 +1,9 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import http from 'http';
 import path from 'path';
+import { Server } from 'socket.io';
 
 import approvalsRouter from './routes/approvals';
 import authRouter from './routes/auth';
@@ -16,6 +18,98 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+const spacePresence = new Map<string, Set<string>>();
+const socketPresence = new Map<string, { spaceId: string; userId: string }>();
+const spaceUserConnectionCounts = new Map<string, number>();
+
+const getPresenceKey = (spaceId: string, userId: string): string => `${spaceId}:${userId}`;
+
+const emitPresenceUpdate = (spaceId: string): void => {
+  io.to(spaceId).emit('presence_update', {
+    spaceId,
+    onlineCount: spacePresence.get(spaceId)?.size ?? 0,
+  });
+};
+
+const removeSocketPresence = (socketId: string): void => {
+  const presence = socketPresence.get(socketId);
+
+  if (!presence) {
+    return;
+  }
+
+  socketPresence.delete(socketId);
+
+  const presenceKey = getPresenceKey(presence.spaceId, presence.userId);
+  const currentCount = spaceUserConnectionCounts.get(presenceKey) ?? 0;
+
+  if (currentCount <= 1) {
+    spaceUserConnectionCounts.delete(presenceKey);
+
+    const users = spacePresence.get(presence.spaceId);
+
+    if (users) {
+      users.delete(presence.userId);
+
+      if (users.size === 0) {
+        spacePresence.delete(presence.spaceId);
+      }
+    }
+  } else {
+    spaceUserConnectionCounts.set(presenceKey, currentCount - 1);
+  }
+
+  emitPresenceUpdate(presence.spaceId);
+};
+
+io.on('connection', (socket) => {
+  socket.on('join_space', (payload: { spaceId?: string; userId?: string }) => {
+    const spaceId =
+      typeof payload?.spaceId === 'string' ? payload.spaceId.trim() : '';
+    const userId =
+      typeof payload?.userId === 'string' ? payload.userId.trim() : '';
+
+    if (!spaceId || !userId) {
+      return;
+    }
+
+    const previousPresence = socketPresence.get(socket.id);
+
+    if (previousPresence) {
+      socket.leave(previousPresence.spaceId);
+      removeSocketPresence(socket.id);
+    }
+
+    socket.join(spaceId);
+    socketPresence.set(socket.id, { spaceId, userId });
+
+    const presenceKey = getPresenceKey(spaceId, userId);
+    const currentCount = spaceUserConnectionCounts.get(presenceKey) ?? 0;
+
+    spaceUserConnectionCounts.set(presenceKey, currentCount + 1);
+
+    let users = spacePresence.get(spaceId);
+
+    if (!users) {
+      users = new Set<string>();
+      spacePresence.set(spaceId, users);
+    }
+
+    users.add(userId);
+    emitPresenceUpdate(spaceId);
+  });
+
+  socket.on('disconnect', () => {
+    removeSocketPresence(socket.id);
+  });
+});
 
 app.use(cors());
 app.use(express.json());
@@ -42,7 +136,7 @@ app.use((_req, res) => {
 
 app.use(errorHandler);
 
-app.listen(port, () => {
+httpServer.listen(port, () => {
   console.log(`Akiba backend listening on port ${port}`);
 });
 
