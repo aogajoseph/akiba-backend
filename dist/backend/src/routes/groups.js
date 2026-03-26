@@ -52,6 +52,17 @@ const buildAdminsResponse = (groupId, userId) => {
         },
     };
 };
+const ensureOptionalFutureDateString = (value) => {
+    const deadline = (0, http_1.ensureOptionalNonEmptyString)(value, 'deadline must be a non-empty ISO date string');
+    if (!deadline) {
+        return undefined;
+    }
+    const parsedDate = new Date(deadline);
+    if (Number.isNaN(parsedDate.getTime())) {
+        throw (0, http_1.createHttpError)(400, 'deadline must be a valid ISO date string');
+    }
+    return parsedDate.toISOString();
+};
 router.post('/', (req, res, next) => {
     try {
         const user = getCurrentUser(req.header('x-user-id'));
@@ -61,6 +72,10 @@ router.post('/', (req, res, next) => {
             description: (0, http_1.ensureOptionalNonEmptyString)(body.description, 'description must be a non-empty string'),
             image: (0, http_1.ensureOptionalNonEmptyString)(body.image, 'image must be a non-empty string'),
             approvalThreshold: (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer'),
+            targetAmount: body.targetAmount === undefined || body.targetAmount === null
+                ? undefined
+                : (0, http_1.ensurePositiveNumber)(body.targetAmount, 'targetAmount must be a positive number'),
+            deadline: ensureOptionalFutureDateString(body.deadline),
         };
         const { group } = (0, groupService_1.createGroup)(user.id, dto);
         const response = {

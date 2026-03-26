@@ -25,6 +25,7 @@ import {
   ensureNonEmptyString,
   ensureOptionalNonEmptyString,
   ensurePositiveInteger,
+  ensurePositiveNumber,
   getObjectBody,
 } from '../utils/http';
 import {
@@ -111,6 +112,25 @@ const buildAdminsResponse = (groupId: string, userId: string): ApiResponse<ListG
   };
 };
 
+const ensureOptionalFutureDateString = (value: unknown): string | undefined => {
+  const deadline = ensureOptionalNonEmptyString(
+    value,
+    'deadline must be a non-empty ISO date string',
+  );
+
+  if (!deadline) {
+    return undefined;
+  }
+
+  const parsedDate = new Date(deadline);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw createHttpError(400, 'deadline must be a valid ISO date string');
+  }
+
+  return parsedDate.toISOString();
+};
+
 router.post('/', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
@@ -129,6 +149,14 @@ router.post('/', (req, res, next) => {
         body.approvalThreshold,
         'approvalThreshold must be a positive integer',
       ),
+      targetAmount:
+        body.targetAmount === undefined || body.targetAmount === null
+          ? undefined
+          : ensurePositiveNumber(
+              body.targetAmount,
+              'targetAmount must be a positive number',
+            ),
+      deadline: ensureOptionalFutureDateString(body.deadline),
     };
 
     const { group } = createGroup(user.id, dto);
