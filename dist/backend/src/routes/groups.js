@@ -63,6 +63,19 @@ const ensureOptionalFutureDateString = (value) => {
     }
     return parsedDate.toISOString();
 };
+const parseOptionalStringField = (value, message) => {
+    if (value === undefined || value === null) {
+        return { provided: false, value: undefined };
+    }
+    if (typeof value !== 'string') {
+        throw (0, http_1.createHttpError)(400, message);
+    }
+    const normalized = value.trim();
+    return {
+        provided: true,
+        value: normalized.length > 0 ? normalized : undefined,
+    };
+};
 router.post('/', (req, res, next) => {
     try {
         const user = getCurrentUser(req.header('x-user-id'));
@@ -112,6 +125,51 @@ router.get('/:groupId', (req, res, next) => {
         const user = getCurrentUser(req.header('x-user-id'));
         const group = getGroupById(req.params.groupId);
         requireMembership(group.id, user.id);
+        const response = {
+            data: {
+                group,
+                space: group,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.patch('/:groupId', (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const body = (0, http_1.getObjectBody)(req.body);
+        const nameField = parseOptionalStringField(body.name, 'name must be a non-empty string');
+        const descriptionField = parseOptionalStringField(body.description, 'description must be a string');
+        const imageUrlField = parseOptionalStringField(body.imageUrl, 'imageUrl must be a string');
+        const deadlineField = parseOptionalStringField(body.deadline, 'deadline must be a valid ISO date string');
+        const dto = {};
+        if (nameField.provided) {
+            dto.name = (0, http_1.ensureNonEmptyString)(nameField.value, 'name must be a non-empty string');
+        }
+        if (descriptionField.provided) {
+            dto.description = descriptionField.value;
+        }
+        if (imageUrlField.provided) {
+            dto.imageUrl = imageUrlField.value;
+        }
+        if (body.approvalThreshold !== undefined) {
+            dto.approvalThreshold = (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer');
+        }
+        if (body.targetAmount !== undefined) {
+            dto.targetAmount =
+                body.targetAmount === null
+                    ? undefined
+                    : (0, http_1.ensurePositiveNumber)(body.targetAmount, 'targetAmount must be a positive number');
+        }
+        if (deadlineField.provided) {
+            dto.deadline = deadlineField.value
+                ? ensureOptionalFutureDateString(deadlineField.value)
+                : undefined;
+        }
+        const group = (0, groupService_1.updateGroup)(req.params.groupId, user.id, dto);
         const response = {
             data: {
                 group,

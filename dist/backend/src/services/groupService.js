@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getSignatoryReport = exports.joinGroup = exports.createGroup = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -112,6 +112,36 @@ const createGroup = (userId, dto) => {
     return { group, member };
 };
 exports.createGroup = createGroup;
+const updateGroup = (groupId, actorUserId, dto) => {
+    const group = getGroupOrThrow(groupId);
+    requireRequesterMembership(groupId, actorUserId);
+    requireCreatorAccess(group, actorUserId);
+    if (dto.name !== undefined) {
+        group.name = dto.name;
+    }
+    if (Object.prototype.hasOwnProperty.call(dto, 'description')) {
+        group.description = dto.description;
+    }
+    if (dto.imageUrl !== undefined) {
+        group.imageUrl = dto.imageUrl;
+    }
+    if (dto.approvalThreshold !== undefined) {
+        if (dto.approvalThreshold > MAX_SIGNATORIES) {
+            throw (0, http_1.createHttpError)(400, 'approvalThreshold cannot exceed the maximum signatories (3)');
+        }
+        group.approvalThreshold = dto.approvalThreshold;
+        clampApprovalThreshold(group);
+    }
+    if (dto.targetAmount !== undefined) {
+        group.targetAmount = dto.targetAmount;
+        group.collectedAmount = dto.targetAmount > 0 ? group.collectedAmount ?? 0 : undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(dto, 'deadline')) {
+        group.deadline = dto.deadline;
+    }
+    return group;
+};
+exports.updateGroup = updateGroup;
 const joinGroup = (groupId, userId) => {
     const nextSignatoryRole = getNextAvailableRole(groupId, JOINABLE_SIGNATORY_ROLES);
     const member = {

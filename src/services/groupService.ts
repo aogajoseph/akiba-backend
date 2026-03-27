@@ -6,6 +6,7 @@ import {
   GroupSignatory,
   SignatoryRole,
   TransactionStatus,
+  UpdateGroupRequestDto,
 } from '../../../shared/contracts';
 import { approvals, groupMembers, groups, messages, transactions, users } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
@@ -153,6 +154,48 @@ export const createGroup = (
   groupMembers.push(member);
 
   return { group, member };
+};
+
+export const updateGroup = (
+  groupId: string,
+  actorUserId: string,
+  dto: UpdateGroupRequestDto,
+): Group => {
+  const group = getGroupOrThrow(groupId);
+  requireRequesterMembership(groupId, actorUserId);
+  requireCreatorAccess(group, actorUserId);
+
+  if (dto.name !== undefined) {
+    group.name = dto.name;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(dto, 'description')) {
+    group.description = dto.description;
+  }
+
+  if (dto.imageUrl !== undefined) {
+    group.imageUrl = dto.imageUrl;
+  }
+
+  if (dto.approvalThreshold !== undefined) {
+    if (dto.approvalThreshold > MAX_SIGNATORIES) {
+      throw createHttpError(400, 'approvalThreshold cannot exceed the maximum signatories (3)');
+    }
+
+    group.approvalThreshold = dto.approvalThreshold;
+    clampApprovalThreshold(group);
+  }
+
+  if (dto.targetAmount !== undefined) {
+    group.targetAmount = dto.targetAmount;
+    group.collectedAmount = dto.targetAmount > 0 ? group.collectedAmount ?? 0 : undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(dto, 'deadline')) {
+    group.deadline = dto.deadline;
+  }
+
+  return group;
 };
 
 export const joinGroup = (groupId: string, userId: string): GroupMember => {

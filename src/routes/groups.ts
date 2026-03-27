@@ -17,6 +17,8 @@ import {
   RevokeGroupMemberResponseDto,
   SpaceAdmin,
   SpaceMember,
+  UpdateGroupRequestDto,
+  UpdateGroupResponseDto,
   User,
 } from '../../../shared/contracts';
 import { groupMembers, groups, users } from '../data/store';
@@ -36,6 +38,7 @@ import {
   leaveGroup,
   promoteMember,
   revokeMember,
+  updateGroup,
 } from '../services/groupService';
 
 const router = Router();
@@ -131,6 +134,26 @@ const ensureOptionalFutureDateString = (value: unknown): string | undefined => {
   return parsedDate.toISOString();
 };
 
+const parseOptionalStringField = (
+  value: unknown,
+  message: string,
+): { provided: boolean; value: string | undefined } => {
+  if (value === undefined || value === null) {
+    return { provided: false, value: undefined };
+  }
+
+  if (typeof value !== 'string') {
+    throw createHttpError(400, message);
+  }
+
+  const normalized = value.trim();
+
+  return {
+    provided: true,
+    value: normalized.length > 0 ? normalized : undefined,
+  };
+};
+
 router.post('/', (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
@@ -202,6 +225,72 @@ router.get('/:groupId', (req: Request<GroupParams>, res, next) => {
     requireMembership(group.id, user.id);
 
     const response: ApiResponse<GetGroupResponseDto> = {
+      data: {
+        group,
+        space: group,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/:groupId', (req: Request<GroupParams>, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const body = getObjectBody(req.body);
+    const nameField = parseOptionalStringField(body.name, 'name must be a non-empty string');
+    const descriptionField = parseOptionalStringField(
+      body.description,
+      'description must be a string',
+    );
+    const imageUrlField = parseOptionalStringField(
+      body.imageUrl,
+      'imageUrl must be a string',
+    );
+    const deadlineField = parseOptionalStringField(
+      body.deadline,
+      'deadline must be a valid ISO date string',
+    );
+    const dto: UpdateGroupRequestDto = {};
+
+    if (nameField.provided) {
+      dto.name = ensureNonEmptyString(nameField.value, 'name must be a non-empty string');
+    }
+
+    if (descriptionField.provided) {
+      dto.description = descriptionField.value;
+    }
+
+    if (imageUrlField.provided) {
+      dto.imageUrl = imageUrlField.value;
+    }
+
+    if (body.approvalThreshold !== undefined) {
+      dto.approvalThreshold = ensurePositiveInteger(
+        body.approvalThreshold,
+        'approvalThreshold must be a positive integer',
+      );
+    }
+
+    if (body.targetAmount !== undefined) {
+      dto.targetAmount =
+        body.targetAmount === null
+          ? undefined
+          : ensurePositiveNumber(body.targetAmount, 'targetAmount must be a positive number');
+    }
+
+    if (deadlineField.provided) {
+      dto.deadline = deadlineField.value
+        ? ensureOptionalFutureDateString(deadlineField.value)
+        : undefined;
+    }
+
+    const group = updateGroup(req.params.groupId, user.id, dto);
+
+    const response: ApiResponse<UpdateGroupResponseDto> = {
       data: {
         group,
         space: group,
