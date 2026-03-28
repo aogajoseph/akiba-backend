@@ -6,6 +6,7 @@ import {
   CreateGroupResponseDto,
   DeleteGroupResponseDto,
   GetGroupResponseDto,
+  GetTransactionsSummaryResponseDto,
   Group,
   GroupMember,
   JoinGroupResponseDto,
@@ -33,6 +34,7 @@ import {
 import {
   createGroup,
   deleteGroup,
+  getTransactionsSummary,
   getSignatoryReport,
   joinGroup,
   leaveGroup,
@@ -45,6 +47,10 @@ const router = Router();
 
 type GroupParams = {
   groupId: string;
+};
+
+type SpaceParams = {
+  spaceId: string;
 };
 
 type GroupMemberParams = {
@@ -210,6 +216,23 @@ router.get('/', (req, res, next) => {
         groups: visibleGroups,
         spaces: visibleGroups,
       },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:spaceId/transactions/summary', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const { spaceId } = req.params;
+    const group = getGroupById(spaceId);
+    requireMembership(group.id, user.id);
+
+    const response: ApiResponse<GetTransactionsSummaryResponseDto> = {
+      data: await getTransactionsSummary(spaceId),
     };
 
     res.json(response);

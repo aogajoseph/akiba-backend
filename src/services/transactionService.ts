@@ -1,6 +1,7 @@
 import {
   CreateDepositRequestDto,
   CreateWithdrawalRequestDto,
+  GetTransactionsSummaryResponseDto,
   Transaction,
   TransactionStatus,
   TransactionType,
@@ -64,4 +65,61 @@ export const getTransaction = (
   return transactions.find(
     (item) => item.groupId === groupId && item.id === transactionId,
   );
+};
+
+const isApprovedTransaction = (transaction: Transaction): boolean => {
+  return (
+    transaction.status === TransactionStatus.APPROVED ||
+    transaction.status === TransactionStatus.COMPLETED
+  );
+};
+
+const buildRunningTotals = (
+  groupId: string,
+  type: TransactionType,
+): number[] => {
+  const relevantTransactions = transactions
+    .filter(
+      (transaction) =>
+        transaction.groupId === groupId &&
+        transaction.type === type &&
+        isApprovedTransaction(transaction),
+    )
+    .sort(
+      (left, right) =>
+        new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+    );
+
+  if (relevantTransactions.length === 0) {
+    return [0];
+  }
+
+  let runningTotal = 0;
+
+  return relevantTransactions.map((transaction) => {
+    runningTotal += transaction.amount;
+    return runningTotal;
+  });
+};
+
+export const getTransactionsSummary = (
+  groupId: string,
+): GetTransactionsSummaryResponseDto => {
+  const approvedTransactions = transactions.filter(
+    (transaction) => transaction.groupId === groupId && isApprovedTransaction(transaction),
+  );
+  const totalDeposits = approvedTransactions
+    .filter((transaction) => transaction.type === TransactionType.DEPOSIT)
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const totalWithdrawals = approvedTransactions
+    .filter((transaction) => transaction.type === TransactionType.WITHDRAWAL)
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  return {
+    totalDeposits,
+    totalWithdrawals,
+    currentBalance: totalDeposits - totalWithdrawals,
+    depositsOverTime: buildRunningTotals(groupId, TransactionType.DEPOSIT),
+    withdrawalsOverTime: buildRunningTotals(groupId, TransactionType.WITHDRAWAL),
+  };
 };

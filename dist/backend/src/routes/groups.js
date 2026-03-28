@@ -120,6 +120,21 @@ router.get('/', (req, res, next) => {
         next(error);
     }
 });
+router.get('/:spaceId/transactions/summary', async (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const { spaceId } = req.params;
+        const group = getGroupById(spaceId);
+        requireMembership(group.id, user.id);
+        const response = {
+            data: await (0, groupService_1.getTransactionsSummary)(spaceId),
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.get('/:groupId', (req, res, next) => {
     try {
         const user = getCurrentUser(req.header('x-user-id'));

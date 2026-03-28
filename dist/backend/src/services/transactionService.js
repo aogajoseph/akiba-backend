@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTransaction = exports.listTransactions = exports.createWithdrawal = exports.createDeposit = void 0;
+exports.getTransactionsSummary = exports.getTransaction = exports.listTransactions = exports.createWithdrawal = exports.createDeposit = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -45,3 +45,39 @@ const getTransaction = (groupId, transactionId) => {
     return store_1.transactions.find((item) => item.groupId === groupId && item.id === transactionId);
 };
 exports.getTransaction = getTransaction;
+const isApprovedTransaction = (transaction) => {
+    return (transaction.status === contracts_1.TransactionStatus.APPROVED ||
+        transaction.status === contracts_1.TransactionStatus.COMPLETED);
+};
+const buildRunningTotals = (groupId, type) => {
+    const relevantTransactions = store_1.transactions
+        .filter((transaction) => transaction.groupId === groupId &&
+        transaction.type === type &&
+        isApprovedTransaction(transaction))
+        .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+    if (relevantTransactions.length === 0) {
+        return [0];
+    }
+    let runningTotal = 0;
+    return relevantTransactions.map((transaction) => {
+        runningTotal += transaction.amount;
+        return runningTotal;
+    });
+};
+const getTransactionsSummary = (groupId) => {
+    const approvedTransactions = store_1.transactions.filter((transaction) => transaction.groupId === groupId && isApprovedTransaction(transaction));
+    const totalDeposits = approvedTransactions
+        .filter((transaction) => transaction.type === contracts_1.TransactionType.DEPOSIT)
+        .reduce((sum, transaction) => sum + transaction.amount, 0);
+    const totalWithdrawals = approvedTransactions
+        .filter((transaction) => transaction.type === contracts_1.TransactionType.WITHDRAWAL)
+        .reduce((sum, transaction) => sum + transaction.amount, 0);
+    return {
+        totalDeposits,
+        totalWithdrawals,
+        currentBalance: totalDeposits - totalWithdrawals,
+        depositsOverTime: buildRunningTotals(groupId, contracts_1.TransactionType.DEPOSIT),
+        withdrawalsOverTime: buildRunningTotals(groupId, contracts_1.TransactionType.WITHDRAWAL),
+    };
+};
+exports.getTransactionsSummary = getTransactionsSummary;

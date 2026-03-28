@@ -5,6 +5,7 @@ import {
   GroupRole,
   GroupSignatory,
   SignatoryRole,
+  TransactionsSummaryDto,
   TransactionStatus,
   UpdateGroupRequestDto,
 } from '../../../shared/contracts';
@@ -240,6 +241,20 @@ export const getSignatoryReport = (
   return {
     signatories,
     remainingSlots: MAX_SIGNATORIES - signatories.length,
+  };
+};
+
+export const getTransactionsSummary = async (
+  spaceId: string,
+): Promise<TransactionsSummaryDto> => {
+  getGroupOrThrow(spaceId);
+
+  return {
+    totalDeposits: 0,
+    totalWithdrawals: 0,
+    currentBalance: 0,
+    depositsOverTime: [],
+    withdrawalsOverTime: [],
   };
 };
 

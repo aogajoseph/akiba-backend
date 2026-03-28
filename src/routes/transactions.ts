@@ -7,6 +7,7 @@ import {
   CreateWithdrawalRequestDto,
   CreateWithdrawalResponseDto,
   GetTransactionResponseDto,
+  GetTransactionsSummaryResponseDto,
   Group,
   GroupMember,
   ListTransactionsResponseDto,
@@ -24,6 +25,7 @@ import {
   createDeposit,
   createWithdrawal,
   getTransaction,
+  getTransactionsSummary,
   listTransactions,
 } from '../services/transactionService';
 
@@ -157,6 +159,23 @@ router.get('/', (req: Request<GroupParams>, res, next) => {
       data: {
         transactions: listTransactions(groupId),
       },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/summary', (req: Request<GroupParams>, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const user = getCurrentUser(req.header('x-user-id'));
+    getGroupById(groupId);
+    requireMembership(groupId, user.id);
+
+    const response: ApiResponse<GetTransactionsSummaryResponseDto> = {
+      data: getTransactionsSummary(groupId),
     };
 
     res.json(response);

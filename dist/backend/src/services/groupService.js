@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -178,6 +178,17 @@ const getSignatoryReport = (groupId, requesterUserId) => {
     };
 };
 exports.getSignatoryReport = getSignatoryReport;
+const getTransactionsSummary = async (spaceId) => {
+    getGroupOrThrow(spaceId);
+    return {
+        totalDeposits: 0,
+        totalWithdrawals: 0,
+        currentBalance: 0,
+        depositsOverTime: [],
+        withdrawalsOverTime: [],
+    };
+};
+exports.getTransactionsSummary = getTransactionsSummary;
 const promoteMember = (groupId, memberId, actorUserId) => {
     const group = getGroupOrThrow(groupId);
     requireRequesterMembership(groupId, actorUserId);

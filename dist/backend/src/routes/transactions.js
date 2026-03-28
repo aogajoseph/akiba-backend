@@ -108,6 +108,21 @@ router.get('/', (req, res, next) => {
         next(error);
     }
 });
+router.get('/summary', (req, res, next) => {
+    try {
+        const { groupId } = req.params;
+        const user = getCurrentUser(req.header('x-user-id'));
+        getGroupById(groupId);
+        requireMembership(groupId, user.id);
+        const response = {
+            data: (0, transactionService_1.getTransactionsSummary)(groupId),
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.get('/:transactionId', (req, res, next) => {
     try {
         const { groupId, transactionId } = req.params;
