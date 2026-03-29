@@ -32,6 +32,7 @@ import {
   getObjectBody,
 } from '../utils/http';
 import {
+  createDeposit,
   createGroup,
   deleteGroup,
   getTransactionsSummary,
@@ -236,6 +237,27 @@ router.get('/:spaceId/transactions/summary', async (req: Request<SpaceParams>, r
     };
 
     res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const { spaceId } = req.params;
+    const group = getGroupById(spaceId);
+    requireMembership(group.id, user.id);
+    const body = getObjectBody(req.body);
+    const amount = ensurePositiveNumber(body.amount, 'amount must be a positive number');
+    const deposit = await createDeposit(spaceId, user.id, amount);
+
+    res.json({
+      data: {
+        success: true,
+        deposit,
+      },
+    });
   } catch (error) {
     next(error);
   }

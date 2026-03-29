@@ -20,6 +20,16 @@ const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
 ];
 const PROMOTABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = ['secondary', 'tertiary'];
 
+type Deposit = {
+  id: string;
+  spaceId: string;
+  userId: string;
+  amount: number;
+  createdAt: string;
+};
+
+const deposits: Deposit[] = [];
+
 const getGroupOrThrow = (groupId: string): Group => {
   const group = groups.find((item) => item.id === groupId);
 
@@ -244,16 +254,47 @@ export const getSignatoryReport = (
   };
 };
 
+export const createDeposit = async (
+  spaceId: string,
+  userId: string,
+  amount: number,
+): Promise<Deposit> => {
+  if (amount <= 0) {
+    throw createHttpError(400, 'amount must be a positive number');
+  }
+
+  const group = getGroupOrThrow(spaceId);
+  const deposit: Deposit = {
+    id: `dep_${Date.now()}`,
+    spaceId,
+    userId,
+    amount,
+    createdAt: new Date().toISOString(),
+  };
+
+  deposits.push(deposit);
+  group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+
+  return deposit;
+};
+
 export const getTransactionsSummary = async (
   spaceId: string,
 ): Promise<TransactionsSummaryDto> => {
   getGroupOrThrow(spaceId);
+  const spaceDeposits = deposits.filter((deposit) => deposit.spaceId === spaceId);
+  const totalDeposits = spaceDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
+  let runningTotal = 0;
+  const depositsOverTime = spaceDeposits.map((deposit) => {
+    runningTotal += deposit.amount;
+    return runningTotal;
+  });
 
   return {
-    totalDeposits: 0,
+    totalDeposits,
     totalWithdrawals: 0,
-    currentBalance: 0,
-    depositsOverTime: [],
+    currentBalance: totalDeposits,
+    depositsOverTime,
     withdrawalsOverTime: [],
   };
 };

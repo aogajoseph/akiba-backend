@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.createDeposit = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -11,6 +11,7 @@ const JOINABLE_SIGNATORY_ROLES = [
     'tertiary',
 ];
 const PROMOTABLE_SIGNATORY_ROLES = ['secondary', 'tertiary'];
+const deposits = [];
 const getGroupOrThrow = (groupId) => {
     const group = store_1.groups.find((item) => item.id === groupId);
     if (!group) {
@@ -178,13 +179,37 @@ const getSignatoryReport = (groupId, requesterUserId) => {
     };
 };
 exports.getSignatoryReport = getSignatoryReport;
+const createDeposit = async (spaceId, userId, amount) => {
+    if (amount <= 0) {
+        throw (0, http_1.createHttpError)(400, 'amount must be a positive number');
+    }
+    const group = getGroupOrThrow(spaceId);
+    const deposit = {
+        id: `dep_${Date.now()}`,
+        spaceId,
+        userId,
+        amount,
+        createdAt: new Date().toISOString(),
+    };
+    deposits.push(deposit);
+    group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+    return deposit;
+};
+exports.createDeposit = createDeposit;
 const getTransactionsSummary = async (spaceId) => {
     getGroupOrThrow(spaceId);
+    const spaceDeposits = deposits.filter((deposit) => deposit.spaceId === spaceId);
+    const totalDeposits = spaceDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
+    let runningTotal = 0;
+    const depositsOverTime = spaceDeposits.map((deposit) => {
+        runningTotal += deposit.amount;
+        return runningTotal;
+    });
     return {
-        totalDeposits: 0,
+        totalDeposits,
         totalWithdrawals: 0,
-        currentBalance: 0,
-        depositsOverTime: [],
+        currentBalance: totalDeposits,
+        depositsOverTime,
         withdrawalsOverTime: [],
     };
 };
