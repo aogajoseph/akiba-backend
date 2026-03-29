@@ -25,6 +25,7 @@ type Deposit = {
   spaceId: string;
   userId: string;
   amount: number;
+  status: 'pending' | 'completed' | 'failed';
   createdAt: string;
 };
 
@@ -34,7 +35,7 @@ type Withdrawal = {
   requestedByUserId: string;
   amount: number;
   reason?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'completed';
+  status: 'pending' | 'approved' | 'completed' | 'failed';
   approvals: string[];
   requiredApprovals: number;
   createdAt: string;
@@ -292,11 +293,20 @@ export const createDeposit = async (
     spaceId,
     userId,
     amount,
+    status: 'pending',
     createdAt: new Date().toISOString(),
   };
 
   deposits.push(deposit);
-  group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+
+  setTimeout(() => {
+    if (deposit.status !== 'pending') {
+      return;
+    }
+
+    deposit.status = 'completed';
+    group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+  }, 2500);
 
   return deposit;
 };
@@ -360,16 +370,24 @@ export const approveWithdrawal = async (
   withdrawal.approvals.push(userId);
 
   if (withdrawal.approvals.length >= withdrawal.requiredApprovals) {
-    const group = getGroupOrThrow(withdrawal.spaceId);
-    const currentBalance = group.collectedAmount ?? 0;
+    withdrawal.status = 'approved';
 
-    if (currentBalance < withdrawal.amount) {
-      withdrawal.approvals = withdrawal.approvals.filter((approvalUserId) => approvalUserId !== userId);
-      throw createHttpError(409, 'Insufficient funds to complete this withdrawal');
-    }
+    setTimeout(() => {
+      if (withdrawal.status !== 'approved') {
+        return;
+      }
 
-    group.collectedAmount = currentBalance - withdrawal.amount;
-    withdrawal.status = 'completed';
+      const group = getGroupOrThrow(withdrawal.spaceId);
+      const currentBalance = group.collectedAmount ?? 0;
+
+      if (currentBalance < withdrawal.amount) {
+        withdrawal.status = 'failed';
+        return;
+      }
+
+      group.collectedAmount = currentBalance - withdrawal.amount;
+      withdrawal.status = 'completed';
+    }, 2500);
   }
 
   return withdrawal;
@@ -379,12 +397,32 @@ export const getTransactionsSummary = async (
   spaceId: string,
 ): Promise<TransactionsSummaryDto> => {
   getGroupOrThrow(spaceId);
-  const spaceDeposits = deposits.filter((deposit) => deposit.spaceId === spaceId);
+  const completedDeposits = deposits.filter(
+    (deposit) => deposit.spaceId === spaceId && deposit.status === 'completed',
+  );
+  const pendingDeposits = deposits
+    .filter((deposit) => deposit.spaceId === spaceId && deposit.status === 'pending')
+    .map((deposit) => {
+      const user = users.find((item) => item.id === deposit.userId);
+
+      return {
+        id: deposit.id,
+        userId: deposit.userId,
+        userName: user?.name ?? deposit.userId,
+        amount: deposit.amount,
+        status: deposit.status,
+        createdAt: deposit.createdAt,
+      };
+    });
   const completedWithdrawals = withdrawals.filter(
     (withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'completed',
   );
   const pendingWithdrawals = withdrawals
-    .filter((withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'pending')
+    .filter(
+      (withdrawal) =>
+        withdrawal.spaceId === spaceId &&
+        (withdrawal.status === 'pending' || withdrawal.status === 'approved'),
+    )
     .map((withdrawal) => {
       const user = users.find((item) => item.id === withdrawal.requestedByUserId);
 
@@ -396,16 +434,17 @@ export const getTransactionsSummary = async (
         reason: withdrawal.reason,
         approvals: withdrawal.approvals,
         requiredApprovals: withdrawal.requiredApprovals,
+        status: withdrawal.status,
         createdAt: withdrawal.createdAt,
       };
     });
-  const totalDeposits = spaceDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
+  const totalDeposits = completedDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
   const totalWithdrawals = completedWithdrawals.reduce(
     (sum, withdrawal) => sum + withdrawal.amount,
     0,
   );
   let runningTotal = 0;
-  const depositsOverTime = spaceDeposits.map((deposit) => {
+  const depositsOverTime = completedDeposits.map((deposit) => {
     runningTotal += deposit.amount;
     return runningTotal;
   });
@@ -422,7 +461,8 @@ export const getTransactionsSummary = async (
     depositsOverTime,
     withdrawalsOverTime,
     pendingWithdrawals,
-  };
+    pendingDeposits,
+  } as TransactionsSummaryDto;
 };
 
 export const promoteMember = (
