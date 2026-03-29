@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
 const MAX_SIGNATORIES = 3;
+const MPESA_PAYBILL_NUMBER = '522522';
 const JOINABLE_SIGNATORY_ROLES = [
     'primary',
     'secondary',
@@ -13,6 +14,26 @@ const JOINABLE_SIGNATORY_ROLES = [
 const PROMOTABLE_SIGNATORY_ROLES = ['secondary', 'tertiary'];
 const deposits = [];
 const withdrawals = [];
+const normalizePhoneNumber = (value) => {
+    const digitsOnly = value.replace(/[^\d]/g, '');
+    if (digitsOnly.startsWith('254')) {
+        return digitsOnly;
+    }
+    if (digitsOnly.startsWith('0')) {
+        return `254${digitsOnly.slice(1)}`;
+    }
+    return digitsOnly;
+};
+const generateAccountNumber = () => {
+    let accountNumber = '';
+    do {
+        accountNumber = `AKB_${Date.now().toString(36).toUpperCase()}_${Math.random()
+            .toString(36)
+            .slice(2, 6)
+            .toUpperCase()}`;
+    } while (store_1.groups.some((group) => group.accountNumber === accountNumber));
+    return accountNumber;
+};
 const getGroupOrThrow = (groupId) => {
     const group = store_1.groups.find((item) => item.id === groupId);
     if (!group) {
@@ -101,6 +122,8 @@ const createGroup = (userId, dto) => {
         name: dto.name,
         description: dto.description,
         imageUrl: dto.image,
+        paybillNumber: MPESA_PAYBILL_NUMBER,
+        accountNumber: generateAccountNumber(),
         targetAmount: dto.targetAmount,
         collectedAmount: dto.targetAmount ? 0 : undefined,
         deadline: dto.deadline,
@@ -187,6 +210,45 @@ const getSignatoryReport = (groupId, requesterUserId) => {
     };
 };
 exports.getSignatoryReport = getSignatoryReport;
+const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, receiptCode) => {
+    const group = store_1.groups.find((item) => item.accountNumber === accountNumber);
+    if (!group) {
+        throw (0, http_1.createHttpError)(404, 'Space not found for this account number');
+    }
+    const existingTransaction = store_1.transactions.find((transaction) => transaction.source === 'mpesa_paybill' && transaction.reference === receiptCode);
+    if (existingTransaction) {
+        return { deposit: null, duplicate: true, group };
+    }
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const matchedUser = store_1.users.find((user) => normalizePhoneNumber(user.phoneNumber) === normalizedPhoneNumber);
+    const deposit = {
+        id: `dep_${Date.now()}`,
+        spaceId: group.id,
+        userId: matchedUser?.id ?? `mpesa_${normalizedPhoneNumber}`,
+        amount,
+        status: 'completed',
+        createdAt: new Date().toISOString(),
+    };
+    const transaction = {
+        id: (0, http_1.createId)('txn'),
+        groupId: group.id,
+        initiatedByUserId: deposit.userId,
+        type: contracts_1.TransactionType.DEPOSIT,
+        amount,
+        currency: 'KES',
+        description: `M-Pesa Paybill deposit via ${group.paybillNumber}`,
+        source: 'mpesa_paybill',
+        reference: receiptCode,
+        phoneNumber: normalizedPhoneNumber,
+        status: contracts_1.TransactionStatus.COMPLETED,
+        createdAt: deposit.createdAt,
+    };
+    deposits.push(deposit);
+    store_1.transactions.push(transaction);
+    group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+    return { deposit, duplicate: false, group };
+};
+exports.processMpesaWebhookPayment = processMpesaWebhookPayment;
 const createDeposit = async (spaceId, userId, amount) => {
     if (amount <= 0) {
         throw (0, http_1.createHttpError)(400, 'amount must be a positive number');

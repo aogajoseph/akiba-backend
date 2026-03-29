@@ -5,14 +5,17 @@ import {
   GroupRole,
   GroupSignatory,
   SignatoryRole,
+  Transaction,
   TransactionsSummaryDto,
   TransactionStatus,
+  TransactionType,
   UpdateGroupRequestDto,
 } from '../../../shared/contracts';
 import { approvals, groupMembers, groups, messages, transactions, users } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
 
 const MAX_SIGNATORIES = 3;
+const MPESA_PAYBILL_NUMBER = '522522';
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
   'primary',
   'secondary',
@@ -43,6 +46,33 @@ type Withdrawal = {
 
 const deposits: Deposit[] = [];
 const withdrawals: Withdrawal[] = [];
+
+const normalizePhoneNumber = (value: string): string => {
+  const digitsOnly = value.replace(/[^\d]/g, '');
+
+  if (digitsOnly.startsWith('254')) {
+    return digitsOnly;
+  }
+
+  if (digitsOnly.startsWith('0')) {
+    return `254${digitsOnly.slice(1)}`;
+  }
+
+  return digitsOnly;
+};
+
+const generateAccountNumber = (): string => {
+  let accountNumber = '';
+
+  do {
+    accountNumber = `AKB_${Date.now().toString(36).toUpperCase()}_${Math.random()
+      .toString(36)
+      .slice(2, 6)
+      .toUpperCase()}`;
+  } while (groups.some((group) => group.accountNumber === accountNumber));
+
+  return accountNumber;
+};
 
 const getGroupOrThrow = (groupId: string): Group => {
   const group = groups.find((item) => item.id === groupId);
@@ -168,6 +198,8 @@ export const createGroup = (
     name: dto.name,
     description: dto.description,
     imageUrl: dto.image,
+    paybillNumber: MPESA_PAYBILL_NUMBER,
+    accountNumber: generateAccountNumber(),
     targetAmount: dto.targetAmount,
     collectedAmount: dto.targetAmount ? 0 : undefined,
     deadline: dto.deadline,
@@ -276,6 +308,61 @@ export const getSignatoryReport = (
     signatories,
     remainingSlots: MAX_SIGNATORIES - signatories.length,
   };
+};
+
+export const processMpesaWebhookPayment = async (
+  amount: number,
+  accountNumber: string,
+  phoneNumber: string,
+  receiptCode: string,
+): Promise<{ deposit: Deposit | null; duplicate: boolean; group: Group }> => {
+  const group = groups.find((item) => item.accountNumber === accountNumber);
+
+  if (!group) {
+    throw createHttpError(404, 'Space not found for this account number');
+  }
+
+  const existingTransaction = transactions.find(
+    (transaction) =>
+      transaction.source === 'mpesa_paybill' && transaction.reference === receiptCode,
+  );
+
+  if (existingTransaction) {
+    return { deposit: null, duplicate: true, group };
+  }
+
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const matchedUser = users.find(
+    (user) => normalizePhoneNumber(user.phoneNumber) === normalizedPhoneNumber,
+  );
+  const deposit: Deposit = {
+    id: `dep_${Date.now()}`,
+    spaceId: group.id,
+    userId: matchedUser?.id ?? `mpesa_${normalizedPhoneNumber}`,
+    amount,
+    status: 'completed',
+    createdAt: new Date().toISOString(),
+  };
+  const transaction: Transaction = {
+    id: createId('txn'),
+    groupId: group.id,
+    initiatedByUserId: deposit.userId,
+    type: TransactionType.DEPOSIT,
+    amount,
+    currency: 'KES',
+    description: `M-Pesa Paybill deposit via ${group.paybillNumber}`,
+    source: 'mpesa_paybill',
+    reference: receiptCode,
+    phoneNumber: normalizedPhoneNumber,
+    status: TransactionStatus.COMPLETED,
+    createdAt: deposit.createdAt,
+  };
+
+  deposits.push(deposit);
+  transactions.push(transaction);
+  group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+
+  return { deposit, duplicate: false, group };
 };
 
 export const createDeposit = async (

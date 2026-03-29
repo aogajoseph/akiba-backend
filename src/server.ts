@@ -9,6 +9,7 @@ import approvalsRouter from './routes/approvals';
 import authRouter from './routes/auth';
 import groupsRouter from './routes/groups';
 import messagesRouter from './routes/messages';
+import paymentsRouter from './routes/payments';
 import typingRouter from './routes/typing';
 import transactionsRouter from './routes/transactions';
 import usersRouter from './routes/users';
@@ -121,6 +122,7 @@ app.get('/health', (_req, res) => {
 
 app.use('/auth', authRouter);
 app.use('/users', usersRouter);
+app.use('/payments', paymentsRouter);
 app.use('/groups', groupsRouter);
 app.use('/spaces', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
