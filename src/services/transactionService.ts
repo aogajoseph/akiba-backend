@@ -121,5 +121,6 @@ export const getTransactionsSummary = (
     currentBalance: totalDeposits - totalWithdrawals,
     depositsOverTime: buildRunningTotals(groupId, TransactionType.DEPOSIT),
     withdrawalsOverTime: buildRunningTotals(groupId, TransactionType.WITHDRAWAL),
+    pendingWithdrawals: [],
   };
 };

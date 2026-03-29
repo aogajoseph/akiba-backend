@@ -155,6 +155,42 @@ router.post('/:spaceId/deposit', async (req, res, next) => {
         next(error);
     }
 });
+router.post('/:spaceId/withdraw', async (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const { spaceId } = req.params;
+        const group = getGroupById(spaceId);
+        requireMembership(group.id, user.id);
+        const body = (0, http_1.getObjectBody)(req.body);
+        const amount = (0, http_1.ensurePositiveNumber)(body.amount, 'amount must be a positive number');
+        const reason = (0, http_1.ensureOptionalNonEmptyString)(body.reason, 'reason must be a non-empty string');
+        const withdrawal = await (0, groupService_1.createWithdrawal)(spaceId, user.id, amount, reason);
+        res.json({
+            data: {
+                success: true,
+                withdrawal,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
+    try {
+        const user = getCurrentUser(req.header('x-user-id'));
+        const withdrawal = await (0, groupService_1.approveWithdrawal)(req.params.withdrawalId, user.id);
+        res.json({
+            data: {
+                success: true,
+                withdrawal,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.get('/:groupId', (req, res, next) => {
     try {
         const user = getCurrentUser(req.header('x-user-id'));

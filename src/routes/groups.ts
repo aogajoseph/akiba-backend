@@ -32,8 +32,10 @@ import {
   getObjectBody,
 } from '../utils/http';
 import {
+  approveWithdrawal,
   createDeposit,
   createGroup,
+  createWithdrawal,
   deleteGroup,
   getTransactionsSummary,
   getSignatoryReport,
@@ -256,6 +258,47 @@ router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) =>
       data: {
         success: true,
         deposit,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:spaceId/withdraw', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const { spaceId } = req.params;
+    const group = getGroupById(spaceId);
+    requireMembership(group.id, user.id);
+    const body = getObjectBody(req.body);
+    const amount = ensurePositiveNumber(body.amount, 'amount must be a positive number');
+    const reason = ensureOptionalNonEmptyString(
+      body.reason,
+      'reason must be a non-empty string',
+    );
+    const withdrawal = await createWithdrawal(spaceId, user.id, amount, reason);
+
+    res.json({
+      data: {
+        success: true,
+        withdrawal,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
+  try {
+    const user = getCurrentUser(req.header('x-user-id'));
+    const withdrawal = await approveWithdrawal(req.params.withdrawalId, user.id);
+
+    res.json({
+      data: {
+        success: true,
+        withdrawal,
       },
     });
   } catch (error) {

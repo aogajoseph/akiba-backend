@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.createDeposit = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -12,6 +12,7 @@ const JOINABLE_SIGNATORY_ROLES = [
 ];
 const PROMOTABLE_SIGNATORY_ROLES = ['secondary', 'tertiary'];
 const deposits = [];
+const withdrawals = [];
 const getGroupOrThrow = (groupId) => {
     const group = store_1.groups.find((item) => item.id === groupId);
     if (!group) {
@@ -83,6 +84,13 @@ const hasPendingApprovalRisk = (groupId, userId) => {
         }
         return store_1.approvals.some((approval) => approval.transactionId === transaction.id && approval.signatoryUserId === userId);
     });
+};
+const isAdminForGroup = (groupId, userId) => {
+    const membership = getMemberByUserId(groupId, userId);
+    if (!membership) {
+        return false;
+    }
+    return membership.role === contracts_1.GroupRole.SIGNATORY || membership.signatoryRole !== null;
 };
 const createGroup = (userId, dto) => {
     if (dto.approvalThreshold > MAX_SIGNATORIES) {
@@ -196,21 +204,96 @@ const createDeposit = async (spaceId, userId, amount) => {
     return deposit;
 };
 exports.createDeposit = createDeposit;
+const createWithdrawal = async (spaceId, userId, amount, reason) => {
+    if (amount <= 0) {
+        throw (0, http_1.createHttpError)(400, 'amount must be a positive number');
+    }
+    const group = getGroupOrThrow(spaceId);
+    const currentBalance = group.collectedAmount ?? 0;
+    if (currentBalance < amount) {
+        throw (0, http_1.createHttpError)(409, 'Insufficient funds in this space');
+    }
+    const withdrawal = {
+        id: `wd_${Date.now()}`,
+        spaceId,
+        requestedByUserId: userId,
+        amount,
+        reason,
+        status: 'pending',
+        approvals: [],
+        requiredApprovals: group.approvalThreshold ?? 1,
+        createdAt: new Date().toISOString(),
+    };
+    withdrawals.push(withdrawal);
+    return withdrawal;
+};
+exports.createWithdrawal = createWithdrawal;
+const approveWithdrawal = async (withdrawalId, userId) => {
+    const withdrawal = withdrawals.find((item) => item.id === withdrawalId);
+    if (!withdrawal) {
+        throw (0, http_1.createHttpError)(404, 'Withdrawal not found');
+    }
+    if (withdrawal.status !== 'pending') {
+        throw (0, http_1.createHttpError)(409, 'Withdrawal is no longer pending');
+    }
+    if (!isAdminForGroup(withdrawal.spaceId, userId)) {
+        throw (0, http_1.createHttpError)(403, 'Only admins can approve withdrawals');
+    }
+    if (withdrawal.approvals.includes(userId)) {
+        throw (0, http_1.createHttpError)(409, 'You have already approved this withdrawal');
+    }
+    withdrawal.approvals.push(userId);
+    if (withdrawal.approvals.length >= withdrawal.requiredApprovals) {
+        const group = getGroupOrThrow(withdrawal.spaceId);
+        const currentBalance = group.collectedAmount ?? 0;
+        if (currentBalance < withdrawal.amount) {
+            withdrawal.approvals = withdrawal.approvals.filter((approvalUserId) => approvalUserId !== userId);
+            throw (0, http_1.createHttpError)(409, 'Insufficient funds to complete this withdrawal');
+        }
+        group.collectedAmount = currentBalance - withdrawal.amount;
+        withdrawal.status = 'completed';
+    }
+    return withdrawal;
+};
+exports.approveWithdrawal = approveWithdrawal;
 const getTransactionsSummary = async (spaceId) => {
     getGroupOrThrow(spaceId);
     const spaceDeposits = deposits.filter((deposit) => deposit.spaceId === spaceId);
+    const completedWithdrawals = withdrawals.filter((withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'completed');
+    const pendingWithdrawals = withdrawals
+        .filter((withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'pending')
+        .map((withdrawal) => {
+        const user = store_1.users.find((item) => item.id === withdrawal.requestedByUserId);
+        return {
+            id: withdrawal.id,
+            requestedByUserId: withdrawal.requestedByUserId,
+            requestedByName: user?.name ?? withdrawal.requestedByUserId,
+            amount: withdrawal.amount,
+            reason: withdrawal.reason,
+            approvals: withdrawal.approvals,
+            requiredApprovals: withdrawal.requiredApprovals,
+            createdAt: withdrawal.createdAt,
+        };
+    });
     const totalDeposits = spaceDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
+    const totalWithdrawals = completedWithdrawals.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
     let runningTotal = 0;
     const depositsOverTime = spaceDeposits.map((deposit) => {
         runningTotal += deposit.amount;
         return runningTotal;
     });
+    let runningWithdrawals = 0;
+    const withdrawalsOverTime = completedWithdrawals.map((withdrawal) => {
+        runningWithdrawals += withdrawal.amount;
+        return runningWithdrawals;
+    });
     return {
         totalDeposits,
-        totalWithdrawals: 0,
-        currentBalance: totalDeposits,
+        totalWithdrawals,
+        currentBalance: totalDeposits - totalWithdrawals,
         depositsOverTime,
-        withdrawalsOverTime: [],
+        withdrawalsOverTime,
+        pendingWithdrawals,
     };
 };
 exports.getTransactionsSummary = getTransactionsSummary;
