@@ -135,6 +135,19 @@ const isAdminForGroup = (groupId, userId) => {
     }
     return membership.role === contracts_1.GroupRole.SIGNATORY || membership.signatoryRole !== null;
 };
+const aggregateByDate = (entries) => {
+    const totalsByDate = {};
+    entries.forEach((entry) => {
+        const date = new Date(entry.createdAt).toISOString().split('T')[0];
+        totalsByDate[date] = (totalsByDate[date] || 0) + entry.amount;
+    });
+    return Object.keys(totalsByDate)
+        .sort()
+        .map((date) => ({
+        date,
+        amount: totalsByDate[date],
+    }));
+};
 const createGroup = (userId, dto) => {
     if (dto.approvalThreshold > MAX_SIGNATORIES) {
         throw (0, http_1.createHttpError)(400, 'approvalThreshold cannot exceed the maximum signatories (3)');
@@ -389,16 +402,8 @@ const getTransactionsSummary = async (spaceId) => {
     });
     const totalDeposits = completedDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
     const totalWithdrawals = completedWithdrawals.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
-    let runningTotal = 0;
-    const depositsOverTime = completedDeposits.map((deposit) => {
-        runningTotal += deposit.amount;
-        return runningTotal;
-    });
-    let runningWithdrawals = 0;
-    const withdrawalsOverTime = completedWithdrawals.map((withdrawal) => {
-        runningWithdrawals += withdrawal.amount;
-        return runningWithdrawals;
-    });
+    const depositsOverTime = aggregateByDate(completedDeposits);
+    const withdrawalsOverTime = aggregateByDate(completedWithdrawals);
     return {
         totalDeposits,
         totalWithdrawals,

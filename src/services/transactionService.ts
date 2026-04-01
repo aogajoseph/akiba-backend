@@ -77,7 +77,7 @@ const isApprovedTransaction = (transaction: Transaction): boolean => {
 const buildRunningTotals = (
   groupId: string,
   type: TransactionType,
-): number[] => {
+): Array<{ date: string; amount: number }> => {
   const relevantTransactions = transactions
     .filter(
       (transaction) =>
@@ -91,15 +91,22 @@ const buildRunningTotals = (
     );
 
   if (relevantTransactions.length === 0) {
-    return [0];
+    return [];
   }
 
-  let runningTotal = 0;
+  const totalsByDate: Record<string, number> = {};
 
-  return relevantTransactions.map((transaction) => {
-    runningTotal += transaction.amount;
-    return runningTotal;
+  relevantTransactions.forEach((transaction) => {
+    const date = new Date(transaction.createdAt).toISOString().split('T')[0];
+    totalsByDate[date] = (totalsByDate[date] || 0) + transaction.amount;
   });
+
+  return Object.keys(totalsByDate)
+    .sort()
+    .map((date) => ({
+      date,
+      amount: totalsByDate[date],
+    }));
 };
 
 export const getTransactionsSummary = (

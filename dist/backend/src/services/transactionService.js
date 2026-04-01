@@ -56,13 +56,19 @@ const buildRunningTotals = (groupId, type) => {
         isApprovedTransaction(transaction))
         .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
     if (relevantTransactions.length === 0) {
-        return [0];
+        return [];
     }
-    let runningTotal = 0;
-    return relevantTransactions.map((transaction) => {
-        runningTotal += transaction.amount;
-        return runningTotal;
+    const totalsByDate = {};
+    relevantTransactions.forEach((transaction) => {
+        const date = new Date(transaction.createdAt).toISOString().split('T')[0];
+        totalsByDate[date] = (totalsByDate[date] || 0) + transaction.amount;
     });
+    return Object.keys(totalsByDate)
+        .sort()
+        .map((date) => ({
+        date,
+        amount: totalsByDate[date],
+    }));
 };
 const getTransactionsSummary = (groupId) => {
     const approvedTransactions = store_1.transactions.filter((transaction) => transaction.groupId === groupId && isApprovedTransaction(transaction));
