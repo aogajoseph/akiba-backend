@@ -1,11 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
 const MAX_SIGNATORIES = 3;
-const MPESA_PAYBILL_NUMBER = '522522';
 const JOINABLE_SIGNATORY_ROLES = [
     'primary',
     'secondary',
@@ -14,6 +13,29 @@ const JOINABLE_SIGNATORY_ROLES = [
 const PROMOTABLE_SIGNATORY_ROLES = ['secondary', 'tertiary'];
 const deposits = [];
 const withdrawals = [];
+const webhookLogs = [];
+const getMpesaPaybillNumber = () => {
+    return process.env.MPESA_PAYBILL?.trim() || '522522';
+};
+const storeWebhookPayload = (payload) => {
+    const logId = (0, http_1.createId)('mpesa_webhook');
+    webhookLogs.push({
+        id: logId,
+        payload,
+        receivedAt: new Date().toISOString(),
+    });
+    return logId;
+};
+exports.storeWebhookPayload = storeWebhookPayload;
+const finalizeWebhookLog = (logId, result) => {
+    const logEntry = webhookLogs.find((entry) => entry.id === logId);
+    if (!logEntry) {
+        return;
+    }
+    logEntry.processedAt = new Date().toISOString();
+    logEntry.result = result;
+};
+exports.finalizeWebhookLog = finalizeWebhookLog;
 const normalizePhoneNumber = (value) => {
     const digitsOnly = value.replace(/[^\d]/g, '');
     if (digitsOnly.startsWith('254')) {
@@ -122,7 +144,7 @@ const createGroup = (userId, dto) => {
         name: dto.name,
         description: dto.description,
         imageUrl: dto.image,
-        paybillNumber: MPESA_PAYBILL_NUMBER,
+        paybillNumber: getMpesaPaybillNumber(),
         accountNumber: generateAccountNumber(),
         targetAmount: dto.targetAmount,
         collectedAmount: dto.targetAmount ? 0 : undefined,
@@ -215,7 +237,7 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
     if (!group) {
         throw (0, http_1.createHttpError)(404, 'Space not found for this account number');
     }
-    const existingTransaction = store_1.transactions.find((transaction) => transaction.source === 'mpesa_paybill' && transaction.reference === receiptCode);
+    const existingTransaction = store_1.transactions.find((transaction) => transaction.reference === receiptCode);
     if (existingTransaction) {
         return { deposit: null, duplicate: true, group };
     }

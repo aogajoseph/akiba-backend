@@ -15,7 +15,6 @@ import { approvals, groupMembers, groups, messages, transactions, users } from '
 import { createHttpError, createId } from '../utils/http';
 
 const MAX_SIGNATORIES = 3;
-const MPESA_PAYBILL_NUMBER = '522522';
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
   'primary',
   'secondary',
@@ -46,6 +45,40 @@ type Withdrawal = {
 
 const deposits: Deposit[] = [];
 const withdrawals: Withdrawal[] = [];
+const webhookLogs: Array<{
+  id: string;
+  payload: Record<string, unknown>;
+  processedAt?: string;
+  receivedAt: string;
+  result?: string;
+}> = [];
+
+const getMpesaPaybillNumber = (): string => {
+  return process.env.MPESA_PAYBILL?.trim() || '522522';
+};
+
+export const storeWebhookPayload = (payload: Record<string, unknown>): string => {
+  const logId = createId('mpesa_webhook');
+
+  webhookLogs.push({
+    id: logId,
+    payload,
+    receivedAt: new Date().toISOString(),
+  });
+
+  return logId;
+};
+
+export const finalizeWebhookLog = (logId: string, result: string): void => {
+  const logEntry = webhookLogs.find((entry) => entry.id === logId);
+
+  if (!logEntry) {
+    return;
+  }
+
+  logEntry.processedAt = new Date().toISOString();
+  logEntry.result = result;
+};
 
 const normalizePhoneNumber = (value: string): string => {
   const digitsOnly = value.replace(/[^\d]/g, '');
@@ -198,7 +231,7 @@ export const createGroup = (
     name: dto.name,
     description: dto.description,
     imageUrl: dto.image,
-    paybillNumber: MPESA_PAYBILL_NUMBER,
+    paybillNumber: getMpesaPaybillNumber(),
     accountNumber: generateAccountNumber(),
     targetAmount: dto.targetAmount,
     collectedAmount: dto.targetAmount ? 0 : undefined,
@@ -323,8 +356,7 @@ export const processMpesaWebhookPayment = async (
   }
 
   const existingTransaction = transactions.find(
-    (transaction) =>
-      transaction.source === 'mpesa_paybill' && transaction.reference === receiptCode,
+    (transaction) => transaction.reference === receiptCode,
   );
 
   if (existingTransaction) {
