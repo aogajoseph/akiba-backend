@@ -1,9 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
+const prisma_1 = require("../lib/prisma");
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES = [
     'primary',
@@ -179,6 +180,51 @@ const createGroup = (userId, dto) => {
     return { group, member };
 };
 exports.createGroup = createGroup;
+const createSpace = async (input) => {
+    const accountNumber = `AKB_${Date.now()}`;
+    try {
+        const space = await prisma_1.prisma.space.create({
+            data: {
+                name: input.name,
+                description: input.description,
+                imageUrl: input.imageUrl,
+                targetAmount: input.targetAmount,
+                deadline: input.deadline ? new Date(input.deadline) : undefined,
+                paybillNumber: getMpesaPaybillNumber(),
+                accountNumber,
+                createdById: input.createdById,
+            },
+        });
+        await prisma_1.prisma.spaceMember.create({
+            data: {
+                spaceId: space.id,
+                userId: input.createdById,
+                role: 'admin',
+            },
+        });
+        return {
+            space: {
+                id: space.id,
+                name: space.name,
+                description: space.description ?? undefined,
+                imageUrl: space.imageUrl ?? undefined,
+                paybillNumber: space.paybillNumber ?? getMpesaPaybillNumber(),
+                accountNumber: space.accountNumber ?? accountNumber,
+                targetAmount: space.targetAmount ?? undefined,
+                collectedAmount: 0,
+                deadline: space.deadline ? space.deadline.toISOString() : undefined,
+                createdByUserId: space.createdById,
+                approvalThreshold: 1,
+                createdAt: space.createdAt.toISOString(),
+            },
+        };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        throw (0, http_1.createHttpError)(500, `Failed to create space: ${message}`);
+    }
+};
+exports.createSpace = createSpace;
 const updateGroup = (groupId, actorUserId, dto) => {
     const group = getGroupOrThrow(groupId);
     requireRequesterMembership(groupId, actorUserId);

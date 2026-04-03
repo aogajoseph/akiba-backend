@@ -76,7 +76,7 @@ const parseOptionalStringField = (value, message) => {
         value: normalized.length > 0 ? normalized : undefined,
     };
 };
-router.post('/', (req, res, next) => {
+router.post('/', async (req, res, next) => {
     try {
         const user = getCurrentUser(req.header('x-user-id'));
         const body = (0, http_1.getObjectBody)(req.body);
@@ -90,11 +90,18 @@ router.post('/', (req, res, next) => {
                 : (0, http_1.ensurePositiveNumber)(body.targetAmount, 'targetAmount must be a positive number'),
             deadline: ensureOptionalFutureDateString(body.deadline),
         };
-        const { group } = (0, groupService_1.createGroup)(user.id, dto);
+        const { space } = await (0, groupService_1.createSpace)({
+            name: dto.name,
+            description: dto.description,
+            imageUrl: dto.image,
+            targetAmount: dto.targetAmount,
+            deadline: dto.deadline,
+            createdById: user.id,
+        });
         const response = {
             data: {
-                group,
-                space: group,
+                group: space,
+                space,
             },
         };
         res.status(201).json(response);

@@ -13,6 +13,7 @@ import {
 } from '../../../shared/contracts';
 import { approvals, groupMembers, groups, messages, transactions, users } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
+import { prisma } from '../lib/prisma';
 
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
@@ -272,6 +273,60 @@ export const createGroup = (
   groupMembers.push(member);
 
   return { group, member };
+};
+
+export const createSpace = async (input: {
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  targetAmount?: number;
+  deadline?: string;
+  createdById: string;
+}): Promise<{ space: Group }> => {
+  const accountNumber = `AKB_${Date.now()}`;
+
+  try {
+    const space = await prisma.space.create({
+      data: {
+        name: input.name,
+        description: input.description,
+        imageUrl: input.imageUrl,
+        targetAmount: input.targetAmount,
+        deadline: input.deadline ? new Date(input.deadline) : undefined,
+        paybillNumber: getMpesaPaybillNumber(),
+        accountNumber,
+        createdById: input.createdById,
+      },
+    });
+
+    await prisma.spaceMember.create({
+      data: {
+        spaceId: space.id,
+        userId: input.createdById,
+        role: 'admin',
+      },
+    });
+
+    return {
+      space: {
+        id: space.id,
+        name: space.name,
+        description: space.description ?? undefined,
+        imageUrl: space.imageUrl ?? undefined,
+        paybillNumber: space.paybillNumber ?? getMpesaPaybillNumber(),
+        accountNumber: space.accountNumber ?? accountNumber,
+        targetAmount: space.targetAmount ?? undefined,
+        collectedAmount: 0,
+        deadline: space.deadline ? space.deadline.toISOString() : undefined,
+        createdByUserId: space.createdById,
+        approvalThreshold: 1,
+        createdAt: space.createdAt.toISOString(),
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    throw createHttpError(500, `Failed to create space: ${message}`);
+  }
 };
 
 export const updateGroup = (

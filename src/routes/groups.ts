@@ -34,7 +34,7 @@ import {
 import {
   approveWithdrawal,
   createDeposit,
-  createGroup,
+  createSpace,
   createWithdrawal,
   deleteGroup,
   getTransactionsSummary,
@@ -163,7 +163,7 @@ const parseOptionalStringField = (
   };
 };
 
-router.post('/', (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
     const user = getCurrentUser(req.header('x-user-id'));
     const body = getObjectBody(req.body);
@@ -191,12 +191,19 @@ router.post('/', (req, res, next) => {
       deadline: ensureOptionalFutureDateString(body.deadline),
     };
 
-    const { group } = createGroup(user.id, dto);
+    const { space } = await createSpace({
+      name: dto.name,
+      description: dto.description,
+      imageUrl: dto.image,
+      targetAmount: dto.targetAmount,
+      deadline: dto.deadline,
+      createdById: user.id,
+    });
 
     const response: ApiResponse<CreateGroupResponseDto> = {
       data: {
-        group,
-        space: group,
+        group: space,
+        space,
       },
     };
 
