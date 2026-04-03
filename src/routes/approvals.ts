@@ -14,13 +14,14 @@ import {
   TransactionType,
   User,
 } from '../../../shared/contracts';
-import { approvals, groupMembers, groups, transactions, users } from '../data/store';
+import { approvals, groupMembers, groups, transactions } from '../data/store';
 import {
   createHttpError,
   ensureEnumValue,
   ensureNonEmptyString,
   getObjectBody,
 } from '../utils/http';
+import { getCurrentUserOrThrow } from '../utils/auth';
 import { getTransaction } from '../services/transactionService';
 import { createApproval, listApprovals } from '../services/approvalService';
 
@@ -31,15 +32,9 @@ type ApprovalParams = {
   transactionId: string;
 };
 
-const getCurrentUser = (headerValue: string | undefined): User => {
+const getCurrentUser = async (headerValue: string | undefined): Promise<User> => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
-  const user = users.find((item) => item.id === userId);
-
-  if (!user) {
-    throw createHttpError(404, 'User not found');
-  }
-
-  return user;
+  return getCurrentUserOrThrow(userId);
 };
 
 const getGroupById = (groupId: string): Group => {
@@ -84,10 +79,10 @@ const requireTransactionInGroup = (groupId: string, transactionId: string): Tran
   return transaction;
 };
 
-router.get('/', (req: Request<ApprovalParams>, res, next) => {
+router.get('/', async (req: Request<ApprovalParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
     const transaction = requireTransactionById(transactionId);
@@ -108,10 +103,10 @@ router.get('/', (req: Request<ApprovalParams>, res, next) => {
   }
 });
 
-router.post('/', (req: Request<ApprovalParams>, res, next) => {
+router.post('/', async (req: Request<ApprovalParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(groupId);
     const membership = requireMembership(groupId, user.id);
     const transaction = requireTransactionById(transactionId);

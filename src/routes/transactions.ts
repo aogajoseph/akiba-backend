@@ -14,13 +14,14 @@ import {
   Transaction,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups, users } from '../data/store';
+import { groupMembers, groups } from '../data/store';
 import {
   createHttpError,
   ensureNonEmptyString,
   ensurePositiveNumber,
   getObjectBody,
 } from '../utils/http';
+import { getCurrentUserOrThrow } from '../utils/auth';
 import {
   createDeposit,
   createWithdrawal,
@@ -40,15 +41,9 @@ type TransactionParams = {
   transactionId: string;
 };
 
-const getCurrentUser = (headerValue: string | undefined): User => {
+const getCurrentUser = async (headerValue: string | undefined): Promise<User> => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
-  const user = users.find((item) => item.id === userId);
-
-  if (!user) {
-    throw createHttpError(404, 'User not found');
-  }
-
-  return user;
+  return getCurrentUserOrThrow(userId);
 };
 
 const getGroupById = (groupId: string): Group => {
@@ -106,10 +101,10 @@ const requireTransaction = (groupId: string, transactionId: string): Transaction
   return transaction;
 };
 
-router.post('/deposits', (req: Request<GroupParams>, res, next) => {
+router.post('/deposits', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
     const dto = parseDepositDto(getObjectBody(req.body));
@@ -127,10 +122,10 @@ router.post('/deposits', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.post('/withdrawals', (req: Request<GroupParams>, res, next) => {
+router.post('/withdrawals', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
     const dto = parseWithdrawalDto(getObjectBody(req.body));
@@ -148,10 +143,10 @@ router.post('/withdrawals', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.get('/', (req: Request<GroupParams>, res, next) => {
+router.get('/', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
 
@@ -167,10 +162,10 @@ router.get('/', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.get('/summary', (req: Request<GroupParams>, res, next) => {
+router.get('/summary', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
 
@@ -184,10 +179,10 @@ router.get('/summary', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.get('/:transactionId', (req: Request<TransactionParams>, res, next) => {
+router.get('/:transactionId', async (req: Request<TransactionParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
     const transaction = requireTransaction(groupId, transactionId);

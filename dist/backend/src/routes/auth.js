@@ -2,29 +2,55 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const store_1 = require("../data/store");
+const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const router = (0, express_1.Router)();
-const getUserById = (userId) => {
-    return store_1.users.find((item) => item.id === userId);
+const mapDbUserToContractUser = (user) => {
+    return {
+        id: user.id,
+        name: user.name ?? '',
+        phoneNumber: user.phone ?? '',
+        createdAt: user.createdAt.toISOString(),
+    };
 };
-router.post('/register', (req, res, next) => {
+const syncUserCache = (user) => {
+    const existingIndex = store_1.users.findIndex((item) => item.id === user.id);
+    if (existingIndex >= 0) {
+        store_1.users[existingIndex] = user;
+        return;
+    }
+    store_1.users.push(user);
+};
+const isUniqueConstraintError = (error) => {
+    return (typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2002');
+};
+router.post('/register', async (req, res, next) => {
     try {
         const body = (0, http_1.getObjectBody)(req.body);
         const dto = {
             name: (0, http_1.ensureNonEmptyString)(body.name, 'Name is required'),
             phoneNumber: (0, http_1.ensureNonEmptyString)(body.phoneNumber, 'Phone Number is required'),
         };
-        const existingUser = store_1.users.find((item) => item.phoneNumber === dto.phoneNumber);
-        if (existingUser) {
-            throw (0, http_1.createHttpError)(409, 'A user with that phone number already exists');
+        let createdUser;
+        try {
+            createdUser = await prisma_1.prisma.user.create({
+                data: {
+                    name: dto.name,
+                    phone: dto.phoneNumber,
+                },
+            });
         }
-        const user = {
-            id: (0, http_1.createId)('user'),
-            name: dto.name,
-            phoneNumber: dto.phoneNumber,
-            createdAt: new Date().toISOString(),
-        };
-        store_1.users.push(user);
+        catch (error) {
+            if (isUniqueConstraintError(error)) {
+                throw (0, http_1.createHttpError)(409, 'A user with that phone number already exists');
+            }
+            throw error;
+        }
+        const user = mapDbUserToContractUser(createdUser);
+        syncUserCache(user);
         const response = {
             data: {
                 user,
@@ -37,16 +63,22 @@ router.post('/register', (req, res, next) => {
         next(error);
     }
 });
-router.post('/login', (req, res, next) => {
+router.post('/login', async (req, res, next) => {
     try {
         const body = (0, http_1.getObjectBody)(req.body);
         const dto = {
             phoneNumber: (0, http_1.ensureNonEmptyString)(body.phoneNumber, 'Phone Number is required'),
         };
-        const user = store_1.users.find((item) => item.phoneNumber === dto.phoneNumber);
-        if (!user) {
+        const dbUser = await prisma_1.prisma.user.findUnique({
+            where: {
+                phone: dto.phoneNumber,
+            },
+        });
+        if (!dbUser) {
             throw (0, http_1.createHttpError)(404, 'User not found');
         }
+        const user = mapDbUserToContractUser(dbUser);
+        syncUserCache(user);
         const response = {
             data: {
                 user,
@@ -59,13 +91,19 @@ router.post('/login', (req, res, next) => {
         next(error);
     }
 });
-router.get('/me', (req, res, next) => {
+router.get('/me', async (req, res, next) => {
     try {
         const userId = (0, http_1.ensureNonEmptyString)(req.header('x-user-id'), 'x-user-id header is required');
-        const user = getUserById(userId);
-        if (!user) {
+        const dbUser = await prisma_1.prisma.user.findUnique({
+            where: {
+                id: userId,
+            },
+        });
+        if (!dbUser) {
             throw (0, http_1.createHttpError)(404, 'User not found');
         }
+        const user = mapDbUserToContractUser(dbUser);
+        syncUserCache(user);
         const response = {
             data: {
                 user,

@@ -31,6 +31,7 @@ import {
   ensurePositiveNumber,
   getObjectBody,
 } from '../utils/http';
+import { getCurrentUserOrThrow } from '../utils/auth';
 import {
   approveWithdrawal,
   createDeposit,
@@ -61,15 +62,9 @@ type GroupMemberParams = {
   memberId: string;
 };
 
-const getCurrentUser = (headerValue: string | undefined): User => {
+const getCurrentUser = async (headerValue: string | undefined): Promise<User> => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
-  const user = users.find((item) => item.id === userId);
-
-  if (!user) {
-    throw createHttpError(404, 'User not found');
-  }
-
-  return user;
+  return getCurrentUserOrThrow(userId);
 };
 
 const getGroupById = (groupId: string): Group => {
@@ -165,7 +160,7 @@ const parseOptionalStringField = (
 
 router.post('/', async (req, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const body = getObjectBody(req.body);
     const dto: CreateGroupRequestDto = {
       name: ensureNonEmptyString(body.name, 'name is required'),
@@ -213,9 +208,9 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const memberships = groupMembers.filter((item) => item.userId === user.id);
     const visibleGroups = groups.filter((group) =>
       memberships.some((membership) => membership.groupId === group.id),
@@ -236,7 +231,7 @@ router.get('/', (req, res, next) => {
 
 router.get('/:spaceId/transactions/summary', async (req: Request<SpaceParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const { spaceId } = req.params;
     const group = getGroupById(spaceId);
     requireMembership(group.id, user.id);
@@ -253,7 +248,7 @@ router.get('/:spaceId/transactions/summary', async (req: Request<SpaceParams>, r
 
 router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const { spaceId } = req.params;
     const group = getGroupById(spaceId);
     requireMembership(group.id, user.id);
@@ -274,7 +269,7 @@ router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) =>
 
 router.post('/:spaceId/withdraw', async (req: Request<SpaceParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const { spaceId } = req.params;
     const group = getGroupById(spaceId);
     requireMembership(group.id, user.id);
@@ -299,7 +294,7 @@ router.post('/:spaceId/withdraw', async (req: Request<SpaceParams>, res, next) =
 
 router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const withdrawal = await approveWithdrawal(req.params.withdrawalId, user.id);
 
     res.json({
@@ -313,9 +308,9 @@ router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
   }
 });
 
-router.get('/:groupId', (req: Request<GroupParams>, res, next) => {
+router.get('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
     requireMembership(group.id, user.id);
 
@@ -332,9 +327,9 @@ router.get('/:groupId', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.patch('/:groupId', (req: Request<GroupParams>, res, next) => {
+router.patch('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const body = getObjectBody(req.body);
     const nameField = parseOptionalStringField(body.name, 'name must be a non-empty string');
     const descriptionField = parseOptionalStringField(
@@ -398,9 +393,9 @@ router.patch('/:groupId', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.delete('/:groupId', (req: Request<GroupParams>, res, next) => {
+router.delete('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     deleteGroup(req.params.groupId, user.id);
 
     const response: ApiResponse<DeleteGroupResponseDto> = {
@@ -415,9 +410,9 @@ router.delete('/:groupId', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.post('/:groupId/join', (req: Request<GroupParams>, res, next) => {
+router.post('/:groupId/join', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
 
     const existingMembership = groupMembers.find(
@@ -442,9 +437,9 @@ router.post('/:groupId/join', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.delete('/:groupId/members/:memberId/leave', (req: Request<GroupMemberParams>, res, next) => {
+router.delete('/:groupId/members/:memberId/leave', async (req: Request<GroupMemberParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const member = leaveGroup(req.params.groupId, req.params.memberId, user.id);
 
     const response: ApiResponse<LeaveGroupResponseDto> = {
@@ -459,9 +454,9 @@ router.delete('/:groupId/members/:memberId/leave', (req: Request<GroupMemberPara
   }
 });
 
-router.get('/:groupId/members', (req: Request<GroupParams>, res, next) => {
+router.get('/:groupId/members', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const group = getGroupById(req.params.groupId);
     requireMembership(group.id, user.id);
 
@@ -480,27 +475,27 @@ router.get('/:groupId/members', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.get('/:groupId/signatories', (req: Request<GroupParams>, res, next) => {
+router.get('/:groupId/signatories', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     res.json(buildAdminsResponse(req.params.groupId, user.id));
   } catch (error) {
     next(error);
   }
 });
 
-router.get('/:groupId/admins', (req: Request<GroupParams>, res, next) => {
+router.get('/:groupId/admins', async (req: Request<GroupParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     res.json(buildAdminsResponse(req.params.groupId, user.id));
   } catch (error) {
     next(error);
   }
 });
 
-router.post('/:groupId/members/:memberId/promote', (req: Request<GroupMemberParams>, res, next) => {
+router.post('/:groupId/members/:memberId/promote', async (req: Request<GroupMemberParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const member = promoteMember(req.params.groupId, req.params.memberId, user.id);
 
     const response: ApiResponse<PromoteGroupMemberResponseDto> = {
@@ -515,9 +510,9 @@ router.post('/:groupId/members/:memberId/promote', (req: Request<GroupMemberPara
   }
 });
 
-router.post('/:groupId/members/:memberId/revoke', (req: Request<GroupMemberParams>, res, next) => {
+router.post('/:groupId/members/:memberId/revoke', async (req: Request<GroupMemberParams>, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const member = revokeMember(req.params.groupId, req.params.memberId, user.id);
 
     const response: ApiResponse<RevokeGroupMemberResponseDto> = {

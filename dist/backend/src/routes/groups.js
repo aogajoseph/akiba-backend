@@ -3,15 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
+const auth_1 = require("../utils/auth");
 const groupService_1 = require("../services/groupService");
 const router = (0, express_1.Router)();
-const getCurrentUser = (headerValue) => {
+const getCurrentUser = async (headerValue) => {
     const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
-    const user = store_1.users.find((item) => item.id === userId);
-    if (!user) {
-        throw (0, http_1.createHttpError)(404, 'User not found');
-    }
-    return user;
+    return (0, auth_1.getCurrentUserOrThrow)(userId);
 };
 const getGroupById = (groupId) => {
     const group = store_1.groups.find((item) => item.id === groupId);
@@ -78,7 +75,7 @@ const parseOptionalStringField = (value, message) => {
 };
 router.post('/', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const body = (0, http_1.getObjectBody)(req.body);
         const dto = {
             name: (0, http_1.ensureNonEmptyString)(body.name, 'name is required'),
@@ -110,9 +107,9 @@ router.post('/', async (req, res, next) => {
         next(error);
     }
 });
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const memberships = store_1.groupMembers.filter((item) => item.userId === user.id);
         const visibleGroups = store_1.groups.filter((group) => memberships.some((membership) => membership.groupId === group.id));
         const response = {
@@ -129,7 +126,7 @@ router.get('/', (req, res, next) => {
 });
 router.get('/:spaceId/transactions/summary', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const { spaceId } = req.params;
         const group = getGroupById(spaceId);
         requireMembership(group.id, user.id);
@@ -144,7 +141,7 @@ router.get('/:spaceId/transactions/summary', async (req, res, next) => {
 });
 router.post('/:spaceId/deposit', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const { spaceId } = req.params;
         const group = getGroupById(spaceId);
         requireMembership(group.id, user.id);
@@ -164,7 +161,7 @@ router.post('/:spaceId/deposit', async (req, res, next) => {
 });
 router.post('/:spaceId/withdraw', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const { spaceId } = req.params;
         const group = getGroupById(spaceId);
         requireMembership(group.id, user.id);
@@ -185,7 +182,7 @@ router.post('/:spaceId/withdraw', async (req, res, next) => {
 });
 router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const withdrawal = await (0, groupService_1.approveWithdrawal)(req.params.withdrawalId, user.id);
         res.json({
             data: {
@@ -198,9 +195,9 @@ router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
         next(error);
     }
 });
-router.get('/:groupId', (req, res, next) => {
+router.get('/:groupId', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const group = getGroupById(req.params.groupId);
         requireMembership(group.id, user.id);
         const response = {
@@ -215,9 +212,9 @@ router.get('/:groupId', (req, res, next) => {
         next(error);
     }
 });
-router.patch('/:groupId', (req, res, next) => {
+router.patch('/:groupId', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const body = (0, http_1.getObjectBody)(req.body);
         const nameField = parseOptionalStringField(body.name, 'name must be a non-empty string');
         const descriptionField = parseOptionalStringField(body.description, 'description must be a string');
@@ -260,9 +257,9 @@ router.patch('/:groupId', (req, res, next) => {
         next(error);
     }
 });
-router.delete('/:groupId', (req, res, next) => {
+router.delete('/:groupId', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         (0, groupService_1.deleteGroup)(req.params.groupId, user.id);
         const response = {
             data: {
@@ -275,9 +272,9 @@ router.delete('/:groupId', (req, res, next) => {
         next(error);
     }
 });
-router.post('/:groupId/join', (req, res, next) => {
+router.post('/:groupId/join', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const group = getGroupById(req.params.groupId);
         const existingMembership = store_1.groupMembers.find((item) => item.groupId === group.id && item.userId === user.id);
         if (existingMembership) {
@@ -295,9 +292,9 @@ router.post('/:groupId/join', (req, res, next) => {
         next(error);
     }
 });
-router.delete('/:groupId/members/:memberId/leave', (req, res, next) => {
+router.delete('/:groupId/members/:memberId/leave', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const member = (0, groupService_1.leaveGroup)(req.params.groupId, req.params.memberId, user.id);
         const response = {
             data: {
@@ -310,9 +307,9 @@ router.delete('/:groupId/members/:memberId/leave', (req, res, next) => {
         next(error);
     }
 });
-router.get('/:groupId/members', (req, res, next) => {
+router.get('/:groupId/members', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const group = getGroupById(req.params.groupId);
         requireMembership(group.id, user.id);
         const members = store_1.groupMembers
@@ -329,27 +326,27 @@ router.get('/:groupId/members', (req, res, next) => {
         next(error);
     }
 });
-router.get('/:groupId/signatories', (req, res, next) => {
+router.get('/:groupId/signatories', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         res.json(buildAdminsResponse(req.params.groupId, user.id));
     }
     catch (error) {
         next(error);
     }
 });
-router.get('/:groupId/admins', (req, res, next) => {
+router.get('/:groupId/admins', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         res.json(buildAdminsResponse(req.params.groupId, user.id));
     }
     catch (error) {
         next(error);
     }
 });
-router.post('/:groupId/members/:memberId/promote', (req, res, next) => {
+router.post('/:groupId/members/:memberId/promote', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const member = (0, groupService_1.promoteMember)(req.params.groupId, req.params.memberId, user.id);
         const response = {
             data: {
@@ -362,9 +359,9 @@ router.post('/:groupId/members/:memberId/promote', (req, res, next) => {
         next(error);
     }
 });
-router.post('/:groupId/members/:memberId/revoke', (req, res, next) => {
+router.post('/:groupId/members/:memberId/revoke', async (req, res, next) => {
     try {
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const member = (0, groupService_1.revokeMember)(req.params.groupId, req.params.memberId, user.id);
         const response = {
             data: {

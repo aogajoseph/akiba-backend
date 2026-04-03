@@ -4,16 +4,13 @@ const express_1 = require("express");
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
+const auth_1 = require("../utils/auth");
 const transactionService_1 = require("../services/transactionService");
 const approvalService_1 = require("../services/approvalService");
 const router = (0, express_1.Router)({ mergeParams: true });
-const getCurrentUser = (headerValue) => {
+const getCurrentUser = async (headerValue) => {
     const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
-    const user = store_1.users.find((item) => item.id === userId);
-    if (!user) {
-        throw (0, http_1.createHttpError)(404, 'User not found');
-    }
-    return user;
+    return (0, auth_1.getCurrentUserOrThrow)(userId);
 };
 const getGroupById = (groupId) => {
     const group = store_1.groups.find((item) => item.id === groupId);
@@ -43,10 +40,10 @@ const requireTransactionInGroup = (groupId, transactionId) => {
     }
     return transaction;
 };
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
         const { groupId, transactionId } = req.params;
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         getGroupById(groupId);
         requireMembership(groupId, user.id);
         const transaction = requireTransactionById(transactionId);
@@ -64,10 +61,10 @@ router.get('/', (req, res, next) => {
         next(error);
     }
 });
-router.post('/', (req, res, next) => {
+router.post('/', async (req, res, next) => {
     try {
         const { groupId, transactionId } = req.params;
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         const group = getGroupById(groupId);
         const membership = requireMembership(groupId, user.id);
         const transaction = requireTransactionById(transactionId);

@@ -14,7 +14,7 @@ import {
   UploadMediaMessageResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups, messages, users } from '../data/store';
+import { groupMembers, groups, messages } from '../data/store';
 import {
   createHttpError,
   createId,
@@ -22,6 +22,7 @@ import {
   ensureOptionalNonEmptyString,
   getObjectBody,
 } from '../utils/http';
+import { getCurrentUserOrThrow } from '../utils/auth';
 import { parseMultipartFormData, storeMediaFiles } from '../utils/media';
 
 const router = Router({ mergeParams: true });
@@ -35,15 +36,9 @@ type MessageParams = {
   messageId: string;
 };
 
-const getCurrentUser = (headerValue: string | undefined): User => {
+const getCurrentUser = async (headerValue: string | undefined): Promise<User> => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
-  const user = users.find((item) => item.id === userId);
-
-  if (!user) {
-    throw createHttpError(404, 'User not found');
-  }
-
-  return user;
+  return getCurrentUserOrThrow(userId);
 };
 
 const getGroupById = (groupId: string): Group => {
@@ -68,10 +63,10 @@ const requireMembership = (groupId: string, userId: string): GroupMember => {
   return membership;
 };
 
-router.get('/', (req: Request<GroupParams>, res, next) => {
+router.get('/', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
 
@@ -93,10 +88,10 @@ router.get('/', (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.post('/', (req: Request<GroupParams>, res, next) => {
+router.post('/', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
     const body = getObjectBody(req.body);
@@ -143,7 +138,7 @@ router.post('/', (req: Request<GroupParams>, res, next) => {
 router.post('/media', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
 
@@ -186,10 +181,10 @@ router.post('/media', async (req: Request<GroupParams>, res, next) => {
   }
 });
 
-router.post('/:messageId/reactions', (req: Request<MessageParams>, res, next) => {
+router.post('/:messageId/reactions', async (req: Request<MessageParams>, res, next) => {
   try {
     const { groupId, messageId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
 
@@ -233,10 +228,10 @@ router.post('/:messageId/reactions', (req: Request<MessageParams>, res, next) =>
   }
 });
 
-router.delete('/:messageId', (req: Request<MessageParams>, res, next) => {
+router.delete('/:messageId', async (req: Request<MessageParams>, res, next) => {
   try {
     const { groupId, messageId } = req.params;
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(groupId);
     requireMembership(groupId, user.id);
 

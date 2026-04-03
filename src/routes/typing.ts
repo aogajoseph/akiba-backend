@@ -9,6 +9,7 @@ import {
 } from '../../../shared/contracts';
 import { groupMembers, groups, typingUsers, users } from '../data/store';
 import { createHttpError, ensureNonEmptyString } from '../utils/http';
+import { getCurrentUserOrThrow } from '../utils/auth';
 
 const router = Router({ mergeParams: true });
 
@@ -17,15 +18,9 @@ type TypingParams = {
   spaceId?: string;
 };
 
-const getCurrentUser = (headerValue: string | undefined): User => {
+const getCurrentUser = async (headerValue: string | undefined): Promise<User> => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
-  const user = users.find((item) => item.id === userId);
-
-  if (!user) {
-    throw createHttpError(404, 'User not found');
-  }
-
-  return user;
+  return getCurrentUserOrThrow(userId);
 };
 
 const getSpaceId = (params: Record<string, string | undefined>): string => {
@@ -62,10 +57,10 @@ const getTypingSet = (spaceId: string): Set<string> => {
   return typingUsers[spaceId];
 };
 
-router.get('/', (req: Request<TypingParams>, res, next) => {
+router.get('/', async (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(spaceId);
     requireMembership(spaceId, user.id);
 
@@ -94,10 +89,10 @@ router.get('/', (req: Request<TypingParams>, res, next) => {
   }
 });
 
-router.post('/start', (req: Request<TypingParams>, res, next) => {
+router.post('/start', async (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(spaceId);
     requireMembership(spaceId, user.id);
 
@@ -109,10 +104,10 @@ router.post('/start', (req: Request<TypingParams>, res, next) => {
   }
 });
 
-router.post('/stop', (req: Request<TypingParams>, res, next) => {
+router.post('/stop', async (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(spaceId);
     requireMembership(spaceId, user.id);
 

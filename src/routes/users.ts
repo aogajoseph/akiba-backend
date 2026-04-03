@@ -5,26 +5,20 @@ import {
   DeleteAccountResponseDto,
   User,
 } from '../../../shared/contracts';
-import { users } from '../data/store';
-import { createHttpError, ensureNonEmptyString } from '../utils/http';
+import { ensureNonEmptyString } from '../utils/http';
+import { getCurrentUserOrThrow } from '../utils/auth';
 import { deleteCurrentUser } from '../services/userService';
 
 const router = Router();
 
-const getCurrentUser = (headerValue: string | undefined): User => {
+const getCurrentUser = async (headerValue: string | undefined): Promise<User> => {
   const userId = ensureNonEmptyString(headerValue, 'x-user-id header is required');
-  const user = users.find((item) => item.id === userId);
-
-  if (!user) {
-    throw createHttpError(404, 'User not found');
-  }
-
-  return user;
+  return getCurrentUserOrThrow(userId);
 };
 
-router.delete('/me', (req, res, next) => {
+router.delete('/me', async (req, res, next) => {
   try {
-    const user = getCurrentUser(req.header('x-user-id'));
+    const user = await getCurrentUser(req.header('x-user-id'));
     const userId = deleteCurrentUser(user.id);
 
     const response: ApiResponse<DeleteAccountResponseDto> = {

@@ -3,14 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
+const auth_1 = require("../utils/auth");
 const router = (0, express_1.Router)({ mergeParams: true });
-const getCurrentUser = (headerValue) => {
+const getCurrentUser = async (headerValue) => {
     const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
-    const user = store_1.users.find((item) => item.id === userId);
-    if (!user) {
-        throw (0, http_1.createHttpError)(404, 'User not found');
-    }
-    return user;
+    return (0, auth_1.getCurrentUserOrThrow)(userId);
 };
 const getSpaceId = (params) => {
     return (0, http_1.ensureNonEmptyString)(params.spaceId ?? params.groupId, 'spaceId is required');
@@ -35,10 +32,10 @@ const getTypingSet = (spaceId) => {
     }
     return store_1.typingUsers[spaceId];
 };
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         getGroupById(spaceId);
         requireMembership(spaceId, user.id);
         const response = {
@@ -63,10 +60,10 @@ router.get('/', (req, res, next) => {
         next(error);
     }
 });
-router.post('/start', (req, res, next) => {
+router.post('/start', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         getGroupById(spaceId);
         requireMembership(spaceId, user.id);
         getTypingSet(spaceId).add(user.id);
@@ -76,10 +73,10 @@ router.post('/start', (req, res, next) => {
         next(error);
     }
 });
-router.post('/stop', (req, res, next) => {
+router.post('/stop', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
-        const user = getCurrentUser(req.header('x-user-id'));
+        const user = await getCurrentUser(req.header('x-user-id'));
         getGroupById(spaceId);
         requireMembership(spaceId, user.id);
         store_1.typingUsers[spaceId]?.delete(user.id);
