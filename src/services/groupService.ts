@@ -286,25 +286,29 @@ export const createSpace = async (input: {
   const accountNumber = `AKB_${Date.now()}`;
 
   try {
-    const space = await prisma.space.create({
-      data: {
-        name: input.name,
-        description: input.description,
-        imageUrl: input.imageUrl,
-        targetAmount: input.targetAmount,
-        deadline: input.deadline ? new Date(input.deadline) : undefined,
-        paybillNumber: getMpesaPaybillNumber(),
-        accountNumber,
-        createdById: input.createdById,
-      },
-    });
+    const space = await prisma.$transaction(async (tx) => {
+      const createdSpace = await tx.space.create({
+        data: {
+          name: input.name,
+          description: input.description,
+          imageUrl: input.imageUrl,
+          targetAmount: input.targetAmount,
+          deadline: input.deadline ? new Date(input.deadline) : undefined,
+          paybillNumber: getMpesaPaybillNumber(),
+          accountNumber,
+          createdById: input.createdById,
+        },
+      });
 
-    await prisma.spaceMember.create({
-      data: {
-        spaceId: space.id,
-        userId: input.createdById,
-        role: 'admin',
-      },
+      await tx.spaceMember.create({
+        data: {
+          spaceId: createdSpace.id,
+          userId: input.createdById,
+          role: 'admin',
+        },
+      });
+
+      return createdSpace;
     });
 
     return {
