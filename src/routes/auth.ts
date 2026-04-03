@@ -10,20 +10,50 @@ import {
   User,
 } from '../../../shared/contracts';
 import { users } from '../data/store';
+import { prisma } from '../lib/prisma';
 import {
   createHttpError,
-  createId,
   ensureNonEmptyString,
   getObjectBody,
 } from '../utils/http';
 
 const router = Router();
 
-const getUserById = (userId: string): User | undefined => {
-  return users.find((item) => item.id === userId);
+const mapDbUserToContractUser = (user: {
+  createdAt: Date;
+  id: string;
+  name: string | null;
+  phone: string | null;
+}): User => {
+  return {
+    id: user.id,
+    name: user.name ?? '',
+    phoneNumber: user.phone ?? '',
+    createdAt: user.createdAt.toISOString(),
+  };
 };
 
-router.post('/register', (req, res, next) => {
+const syncUserCache = (user: User): void => {
+  const existingIndex = users.findIndex((item) => item.id === user.id);
+
+  if (existingIndex >= 0) {
+    users[existingIndex] = user;
+    return;
+  }
+
+  users.push(user);
+};
+
+const isUniqueConstraintError = (error: unknown): boolean => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2002'
+  );
+};
+
+router.post('/register', async (req, res, next) => {
   try {
     const body = getObjectBody(req.body);
     const dto: RegisterRequestDto = {
@@ -31,19 +61,25 @@ router.post('/register', (req, res, next) => {
       phoneNumber: ensureNonEmptyString(body.phoneNumber, 'Phone Number is required'),
     };
 
-    const existingUser = users.find((item) => item.phoneNumber === dto.phoneNumber);
-    if (existingUser) {
-      throw createHttpError(409, 'A user with that phone number already exists');
+    let createdUser;
+
+    try {
+      createdUser = await prisma.user.create({
+        data: {
+          name: dto.name,
+          phone: dto.phoneNumber,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw createHttpError(409, 'A user with that phone number already exists');
+      }
+
+      throw error;
     }
 
-    const user: User = {
-      id: createId('user'),
-      name: dto.name,
-      phoneNumber: dto.phoneNumber,
-      createdAt: new Date().toISOString(),
-    };
-
-    users.push(user);
+    const user = mapDbUserToContractUser(createdUser);
+    syncUserCache(user);
 
     const response: ApiResponse<RegisterResponseDto> = {
       data: {
@@ -58,17 +94,25 @@ router.post('/register', (req, res, next) => {
   }
 });
 
-router.post('/login', (req, res, next) => {
+router.post('/login', async (req, res, next) => {
   try {
     const body = getObjectBody(req.body);
     const dto: LoginRequestDto = {
       phoneNumber: ensureNonEmptyString(body.phoneNumber, 'Phone Number is required'),
     };
 
-    const user = users.find((item) => item.phoneNumber === dto.phoneNumber);
-    if (!user) {
+    const dbUser = await prisma.user.findUnique({
+      where: {
+        phone: dto.phoneNumber,
+      },
+    });
+
+    if (!dbUser) {
       throw createHttpError(404, 'User not found');
     }
+
+    const user = mapDbUserToContractUser(dbUser);
+    syncUserCache(user);
 
     const response: ApiResponse<LoginResponseDto> = {
       data: {
@@ -83,14 +127,21 @@ router.post('/login', (req, res, next) => {
   }
 });
 
-router.get('/me', (req, res, next) => {
+router.get('/me', async (req, res, next) => {
   try {
     const userId = ensureNonEmptyString(req.header('x-user-id'), 'x-user-id header is required');
-    const user = getUserById(userId);
+    const dbUser = await prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
 
-    if (!user) {
+    if (!dbUser) {
       throw createHttpError(404, 'User not found');
     }
+
+    const user = mapDbUserToContractUser(dbUser);
+    syncUserCache(user);
 
     const response: ApiResponse<MeResponseDto> = {
       data: {
