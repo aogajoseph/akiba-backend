@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import {
   CreateDepositRequestDto,
   CreateWithdrawalRequestDto,
@@ -7,33 +8,77 @@ import {
   TransactionStatus,
   TransactionType,
 } from '../../../shared/contracts';
+import { prisma } from '../lib/prisma';
 import { transactions } from '../data/store';
 import { createId } from '../utils/http';
+import { createDeposit as createSpaceDeposit } from './groupService';
 
-export const createDeposit = (
+const mapDbTransactionToContractTransaction = (transaction: {
+  amount: Prisma.Decimal | number;
+  createdAt: Date;
+  externalName: string | null;
+  id: string;
+  phoneNumber: string | null;
+  reference: string;
+  source: TransactionSource | string;
+  spaceId: string;
+  status: TransactionStatus | string;
+  type: TransactionType | string;
+  userId: string | null;
+}): Transaction => {
+  const amount =
+    typeof transaction.amount === 'number'
+      ? transaction.amount
+      : Number(transaction.amount);
+
+  return {
+    id: transaction.id,
+    spaceId: transaction.spaceId,
+    userId: transaction.userId ?? undefined,
+    groupId: transaction.spaceId,
+    initiatedByUserId: transaction.userId ?? `external_${transaction.id}`,
+    type: transaction.type as TransactionType,
+    amount,
+    reference: transaction.reference,
+    source: transaction.source as TransactionSource,
+    phoneNumber: transaction.phoneNumber ?? undefined,
+    externalName: transaction.externalName ?? undefined,
+    status: transaction.status as TransactionStatus,
+    createdAt: transaction.createdAt.toISOString(),
+    currency: 'KES',
+  };
+};
+
+const mergeTransactions = (
+  persistedTransactions: Transaction[],
+  legacyTransactions: Transaction[],
+): Transaction[] => {
+  const persistedIds = new Set(persistedTransactions.map((item) => item.id));
+  const persistedReferences = new Set(persistedTransactions.map((item) => item.reference));
+  const uniqueLegacyTransactions = legacyTransactions.filter(
+    (item) => !persistedIds.has(item.id) && !persistedReferences.has(item.reference),
+  );
+
+  return [...persistedTransactions, ...uniqueLegacyTransactions].sort(
+    (left, right) =>
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+  );
+};
+
+export const createDeposit = async (
   groupId: string,
   userId: string,
   dto: CreateDepositRequestDto,
-): Transaction => {
-  const transaction: Transaction = {
-    id: createId('txn'),
-    spaceId: groupId,
-    userId,
-    groupId,
-    initiatedByUserId: userId,
-    type: TransactionType.DEPOSIT,
-    amount: dto.amount,
-    reference: createId('deposit_ref'),
+): Promise<Transaction> => {
+  const transaction = await createSpaceDeposit(groupId, userId, dto.amount, {
     source: TransactionSource.MPESA_STK,
+  });
+
+  return {
+    ...transaction,
     currency: dto.currency,
     description: dto.description,
-    status: TransactionStatus.COMPLETED,
-    createdAt: new Date().toISOString(),
   };
-
-  transactions.push(transaction);
-
-  return transaction;
 };
 
 export const createWithdrawal = (
@@ -63,36 +108,55 @@ export const createWithdrawal = (
   return transaction;
 };
 
-export const listTransactions = (groupId: string): Transaction[] => {
-  return transactions.filter((item) => item.groupId === groupId);
+export const listTransactions = async (groupId: string): Promise<Transaction[]> => {
+  const persistedTransactions = await prisma.transaction.findMany({
+    where: {
+      spaceId: groupId,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+  const mappedPersistedTransactions = persistedTransactions.map(
+    mapDbTransactionToContractTransaction,
+  );
+  const legacyTransactions = transactions.filter((item) => item.groupId === groupId);
+
+  return mergeTransactions(mappedPersistedTransactions, legacyTransactions);
 };
 
 export const getTransaction = (
   groupId: string,
   transactionId: string,
-): Transaction | undefined => {
-  return transactions.find(
-    (item) => item.groupId === groupId && item.id === transactionId,
-  );
+): Promise<Transaction | undefined> => {
+  return prisma.transaction.findUnique({
+    where: {
+      id: transactionId,
+    },
+  }).then((transaction) => {
+    if (transaction && transaction.spaceId === groupId) {
+      return mapDbTransactionToContractTransaction(transaction);
+    }
+
+    return transactions.find(
+      (item) => item.groupId === groupId && item.id === transactionId,
+    );
+  });
 };
 
-const isApprovedTransaction = (transaction: Transaction): boolean => {
-  return (
-    transaction.status === TransactionStatus.APPROVED ||
-    transaction.status === TransactionStatus.COMPLETED
-  );
+const isCompletedTransaction = (transaction: Transaction): boolean => {
+  return transaction.status === TransactionStatus.COMPLETED;
 };
 
 const buildRunningTotals = (
-  groupId: string,
+  transactionsByGroup: Transaction[],
   type: TransactionType,
 ): Array<{ date: string; amount: number }> => {
-  const relevantTransactions = transactions
+  const relevantTransactions = transactionsByGroup
     .filter(
       (transaction) =>
-        transaction.groupId === groupId &&
         transaction.type === type &&
-        isApprovedTransaction(transaction),
+        isCompletedTransaction(transaction),
     )
     .sort(
       (left, right) =>
@@ -118,16 +182,15 @@ const buildRunningTotals = (
     }));
 };
 
-export const getTransactionsSummary = (
+export const getTransactionsSummary = async (
   groupId: string,
-): GetTransactionsSummaryResponseDto => {
-  const approvedTransactions = transactions.filter(
-    (transaction) => transaction.groupId === groupId && isApprovedTransaction(transaction),
-  );
-  const totalDeposits = approvedTransactions
+): Promise<GetTransactionsSummaryResponseDto> => {
+  const allTransactions = await listTransactions(groupId);
+  const completedTransactions = allTransactions.filter(isCompletedTransaction);
+  const totalDeposits = completedTransactions
     .filter((transaction) => transaction.type === TransactionType.DEPOSIT)
     .reduce((sum, transaction) => sum + transaction.amount, 0);
-  const totalWithdrawals = approvedTransactions
+  const totalWithdrawals = completedTransactions
     .filter((transaction) => transaction.type === TransactionType.WITHDRAWAL)
     .reduce((sum, transaction) => sum + transaction.amount, 0);
 
@@ -135,8 +198,8 @@ export const getTransactionsSummary = (
     totalDeposits,
     totalWithdrawals,
     currentBalance: totalDeposits - totalWithdrawals,
-    depositsOverTime: buildRunningTotals(groupId, TransactionType.DEPOSIT),
-    withdrawalsOverTime: buildRunningTotals(groupId, TransactionType.WITHDRAWAL),
+    depositsOverTime: buildRunningTotals(allTransactions, TransactionType.DEPOSIT),
+    withdrawalsOverTime: buildRunningTotals(allTransactions, TransactionType.WITHDRAWAL),
     pendingWithdrawals: [],
   };
 };

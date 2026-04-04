@@ -10,11 +10,12 @@ import {
   GetTransactionsSummaryResponseDto,
   Group,
   GroupMember,
+  GroupRole,
   ListTransactionsResponseDto,
   Transaction,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups } from '../data/store';
+import { prisma } from '../lib/prisma';
 import {
   createHttpError,
   ensureNonEmptyString,
@@ -46,26 +47,53 @@ const getCurrentUser = async (headerValue: string | undefined): Promise<User> =>
   return getCurrentUserOrThrow(userId);
 };
 
-const getGroupById = (groupId: string): Group => {
-  const group = groups.find((item) => item.id === groupId);
+const getGroupById = async (groupId: string): Promise<Group> => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: groupId,
+    },
+  });
 
-  if (!group) {
+  if (!space) {
     throw createHttpError(404, 'Group not found');
   }
 
-  return group;
+  return {
+    id: space.id,
+    name: space.name,
+    description: space.description ?? undefined,
+    imageUrl: space.imageUrl ?? undefined,
+    paybillNumber: space.paybillNumber ?? process.env.MPESA_PAYBILL?.trim() ?? '522522',
+    accountNumber: space.accountNumber ?? '',
+    targetAmount: space.targetAmount ?? undefined,
+    collectedAmount: 0,
+    deadline: space.deadline?.toISOString(),
+    createdByUserId: space.createdById,
+    approvalThreshold: 1,
+    createdAt: space.createdAt.toISOString(),
+  };
 };
 
-const requireMembership = (groupId: string, userId: string): GroupMember => {
-  const membership = groupMembers.find(
-    (item) => item.groupId === groupId && item.userId === userId,
-  );
+const requireMembership = async (groupId: string, userId: string): Promise<GroupMember> => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId: groupId,
+      userId,
+    },
+  });
 
   if (!membership) {
     throw createHttpError(403, 'You are not a member of this group');
   }
 
-  return membership;
+  return {
+    id: membership.id,
+    groupId: membership.spaceId,
+    userId: membership.userId,
+    role: membership.role === 'admin' ? GroupRole.SIGNATORY : GroupRole.MEMBER,
+    signatoryRole: membership.role === 'admin' ? 'primary' : null,
+    joinedAt: membership.createdAt.toISOString(),
+  };
 };
 
 const parseDepositDto = (body: Record<string, unknown>): CreateDepositRequestDto => {
@@ -91,8 +119,11 @@ const parseWithdrawalDto = (body: Record<string, unknown>): CreateWithdrawalRequ
   };
 };
 
-const requireTransaction = (groupId: string, transactionId: string): Transaction => {
-  const transaction = getTransaction(groupId, transactionId);
+const requireTransaction = async (
+  groupId: string,
+  transactionId: string,
+): Promise<Transaction> => {
+  const transaction = await getTransaction(groupId, transactionId);
 
   if (!transaction) {
     throw createHttpError(404, 'Transaction not found');
@@ -105,10 +136,10 @@ router.post('/deposits', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
     const dto = parseDepositDto(getObjectBody(req.body));
-    const transaction = createDeposit(groupId, user.id, dto);
+    const transaction = await createDeposit(groupId, user.id, dto);
 
     const response: ApiResponse<CreateDepositResponseDto> = {
       data: {
@@ -126,8 +157,8 @@ router.post('/withdrawals', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
     const dto = parseWithdrawalDto(getObjectBody(req.body));
     const transaction = createWithdrawal(groupId, user.id, dto);
 
@@ -147,12 +178,12 @@ router.get('/', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
 
     const response: ApiResponse<ListTransactionsResponseDto> = {
       data: {
-        transactions: listTransactions(groupId),
+        transactions: await listTransactions(groupId),
       },
     };
 
@@ -166,11 +197,11 @@ router.get('/summary', async (req: Request<GroupParams>, res, next) => {
   try {
     const { groupId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
 
     const response: ApiResponse<GetTransactionsSummaryResponseDto> = {
-      data: getTransactionsSummary(groupId),
+      data: await getTransactionsSummary(groupId),
     };
 
     res.json(response);
@@ -183,9 +214,9 @@ router.get('/:transactionId', async (req: Request<TransactionParams>, res, next)
   try {
     const { groupId, transactionId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
-    const transaction = requireTransaction(groupId, transactionId);
+    await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
+    const transaction = await requireTransaction(groupId, transactionId);
 
     const response: ApiResponse<GetTransactionResponseDto> = {
       data: {

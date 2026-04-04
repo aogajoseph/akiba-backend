@@ -16,6 +16,7 @@ import {
   PromoteGroupMemberResponseDto,
   RevokeGroupMemberResponseDto,
   SpaceAdmin,
+  TransactionSource,
   UpdateGroupRequestDto,
   UpdateGroupResponseDto,
   User,
@@ -36,6 +37,7 @@ import {
   createSpace,
   createWithdrawal,
   deleteGroup,
+  getCompletedBalancesBySpaceIds,
   getTransactionsSummary,
   getSpaceMembers,
   joinSpace,
@@ -80,7 +82,7 @@ const mapSpaceToGroup = (space: {
   name: string;
   paybillNumber: string | null;
   targetAmount: number | null;
-}): Group => {
+}, collectedAmount = 0): Group => {
   return {
     id: space.id,
     name: space.name,
@@ -89,7 +91,7 @@ const mapSpaceToGroup = (space: {
     paybillNumber: space.paybillNumber ?? getDefaultPaybillNumber(),
     accountNumber: space.accountNumber ?? '',
     targetAmount: space.targetAmount ?? undefined,
-    collectedAmount: 0,
+    collectedAmount,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
     approvalThreshold: 1,
@@ -109,7 +111,8 @@ const getGroupById = async (groupId: string): Promise<Group> => {
     throw createHttpError(404, 'Group not found');
   }
 
-  return mapSpaceToGroup(space);
+  const balancesBySpaceId = await getCompletedBalancesBySpaceIds([normalizedGroupId]);
+  return mapSpaceToGroup(space, balancesBySpaceId.get(normalizedGroupId) ?? 0);
 };
 
 const requireMembership = async (groupId: string, userId: string) => {
@@ -272,11 +275,17 @@ router.get('/', async (req, res, next) => {
         space: true,
       },
     });
+    const balancesBySpaceId = await getCompletedBalancesBySpaceIds(
+      memberships.map((membership) => membership.space.id),
+    );
     const visibleGroups = Array.from(
       new Map(
         memberships.map((membership) => [
           membership.space.id,
-          mapSpaceToGroup(membership.space),
+          mapSpaceToGroup(
+            membership.space,
+            balancesBySpaceId.get(membership.space.id) ?? 0,
+          ),
         ]),
       ).values(),
     );
@@ -319,7 +328,19 @@ router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) =>
     await requireMembership(group.id, user.id);
     const body = getObjectBody(req.body);
     const amount = ensurePositiveNumber(body.amount, 'amount must be a positive number');
-    const deposit = await createDeposit(spaceId, user.id, amount);
+    const phoneNumber = ensureOptionalNonEmptyString(
+      body.phoneNumber,
+      'phoneNumber must be a non-empty string',
+    );
+    const externalName = ensureOptionalNonEmptyString(
+      body.externalName,
+      'externalName must be a non-empty string',
+    );
+    const deposit = await createDeposit(spaceId, user.id, amount, {
+      phoneNumber,
+      externalName,
+      source: TransactionSource.MPESA_STK,
+    });
 
     res.json({
       data: {

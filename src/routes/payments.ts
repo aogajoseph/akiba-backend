@@ -75,7 +75,7 @@ router.post('/mpesa/webhook', async (req, res, next) => {
 
   try {
     const payload = getObjectBody(req.body);
-    logId = storeWebhookPayload(payload);
+    logId = await storeWebhookPayload(payload);
     const configuredSecret = process.env.MPESA_WEBHOOK_SECRET?.trim();
     const providedSecret = coerceNonEmptyString(req.header('x-webhook-secret'));
 
@@ -103,6 +103,10 @@ router.post('/mpesa/webhook', async (req, res, next) => {
       coerceNonEmptyString(payload.MSISDN) ??
       coerceNonEmptyString(payload.phoneNumber) ??
       coerceNonEmptyString(getNestedValue(payload, ['MSISDN']));
+    const externalName =
+      coerceNonEmptyString(payload.externalName) ??
+      coerceNonEmptyString(getNestedValue(payload, ['FirstName'])) ??
+      coerceNonEmptyString(getNestedValue(payload, ['firstName']));
     const receiptCode =
       coerceNonEmptyString(callbackMetadata.MpesaReceiptNumber) ??
       coerceNonEmptyString(payload.TransID) ??
@@ -118,11 +122,17 @@ router.post('/mpesa/webhook', async (req, res, next) => {
       accountNumber,
       phoneNumber,
       receiptCode,
+      externalName ?? undefined,
     );
 
-    finalizeWebhookLog(
+    await finalizeWebhookLog(
       logId,
       result.duplicate ? `duplicate:${receiptCode}` : `processed:${receiptCode}`,
+      {
+        reference: receiptCode,
+        spaceId: result.group.id,
+        status: result.duplicate ? 'duplicate' : 'processed',
+      },
     );
     console.info('M-Pesa webhook processed', {
       accountNumber,
@@ -139,9 +149,13 @@ router.post('/mpesa/webhook', async (req, res, next) => {
     });
   } catch (error) {
     if (logId) {
-      finalizeWebhookLog(
+      await finalizeWebhookLog(
         logId,
         `failed:${error instanceof Error ? error.message : 'unknown error'}`,
+        {
+          errorMessage: error instanceof Error ? error.message : 'unknown error',
+          status: 'failed',
+        },
       );
     }
 

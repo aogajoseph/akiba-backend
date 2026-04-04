@@ -33,8 +33,8 @@ const requireTransactionById = (transactionId) => {
     }
     return transaction;
 };
-const requireTransactionInGroup = (groupId, transactionId) => {
-    const transaction = (0, transactionService_1.getTransaction)(groupId, transactionId);
+const requireTransactionInGroup = async (groupId, transactionId) => {
+    const transaction = await (0, transactionService_1.getTransaction)(groupId, transactionId);
     if (!transaction) {
         throw (0, http_1.createHttpError)(404, 'Transaction not found');
     }
@@ -89,7 +89,7 @@ router.post('/', async (req, res, next) => {
             status: (0, http_1.ensureEnumValue)(body.status, [contracts_1.ApprovalStatus.APPROVED, contracts_1.ApprovalStatus.REJECTED], 'status must be approved or rejected'),
         };
         const approval = (0, approvalService_1.createApproval)(transaction.id, user.id, dto);
-        const updatedTransaction = requireTransactionInGroup(groupId, transactionId);
+        const updatedTransaction = await requireTransactionInGroup(groupId, transactionId);
         const response = {
             data: {
                 approval,

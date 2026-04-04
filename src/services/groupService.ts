@@ -13,10 +13,11 @@ import {
   TransactionType,
   UpdateGroupRequestDto,
 } from '../../../shared/contracts';
+import type { Prisma } from '@prisma/client';
 import { approvals, groupMembers, groups, messages, transactions } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
 import { prisma } from '../lib/prisma';
-import { getUserByPhoneNumber, getUsersByIds } from '../utils/auth';
+import { getUsersByIds } from '../utils/auth';
 
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
@@ -25,15 +26,6 @@ const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
   'tertiary',
 ];
 const PROMOTABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = ['secondary', 'tertiary'];
-
-type Deposit = {
-  id: string;
-  spaceId: string;
-  userId: string;
-  amount: number;
-  status: 'pending' | 'completed' | 'failed';
-  createdAt: string;
-};
 
 type Withdrawal = {
   id: string;
@@ -47,15 +39,7 @@ type Withdrawal = {
   createdAt: string;
 };
 
-const deposits: Deposit[] = [];
 const withdrawals: Withdrawal[] = [];
-const webhookLogs: Array<{
-  id: string;
-  payload: Record<string, unknown>;
-  processedAt?: string;
-  receivedAt: string;
-  result?: string;
-}> = [];
 
 const getMpesaPaybillNumber = (): string => {
   return process.env.MPESA_PAYBILL?.trim() || '522522';
@@ -133,27 +117,124 @@ const mapDbSpaceMemberToSpaceMember = (member: {
   };
 };
 
-export const storeWebhookPayload = (payload: Record<string, unknown>): string => {
-  const logId = createId('mpesa_webhook');
+const mapDbTransactionToContractTransaction = (transaction: {
+  amount: Prisma.Decimal | number;
+  createdAt: Date;
+  externalName: string | null;
+  id: string;
+  phoneNumber: string | null;
+  reference: string;
+  source: TransactionSource | string;
+  spaceId: string;
+  status: TransactionStatus | string;
+  type: TransactionType | string;
+  userId: string | null;
+}): Transaction => {
+  const amount =
+    typeof transaction.amount === 'number'
+      ? transaction.amount
+      : Number(transaction.amount);
 
-  webhookLogs.push({
-    id: logId,
-    payload,
-    receivedAt: new Date().toISOString(),
-  });
-
-  return logId;
+  return {
+    id: transaction.id,
+    spaceId: transaction.spaceId,
+    userId: transaction.userId ?? undefined,
+    groupId: transaction.spaceId,
+    initiatedByUserId: transaction.userId ?? `external_${transaction.id}`,
+    type: transaction.type as TransactionType,
+    amount,
+    reference: transaction.reference,
+    source: transaction.source as TransactionSource,
+    phoneNumber: transaction.phoneNumber ?? undefined,
+    externalName: transaction.externalName ?? undefined,
+    status: transaction.status as TransactionStatus,
+    createdAt: transaction.createdAt.toISOString(),
+    currency: 'KES',
+  };
 };
 
-export const finalizeWebhookLog = (logId: string, result: string): void => {
-  const logEntry = webhookLogs.find((entry) => entry.id === logId);
+export const getCompletedBalancesBySpaceIds = async (
+  spaceIds: string[],
+): Promise<Map<string, number>> => {
+  const uniqueSpaceIds = Array.from(new Set(spaceIds.filter(Boolean)));
 
-  if (!logEntry) {
-    return;
+  if (uniqueSpaceIds.length === 0) {
+    return new Map<string, number>();
   }
 
-  logEntry.processedAt = new Date().toISOString();
-  logEntry.result = result;
+  const groupedTransactions = await prisma.transaction.groupBy({
+    by: ['spaceId', 'type'],
+    where: {
+      spaceId: {
+        in: uniqueSpaceIds,
+      },
+      status: TransactionStatus.COMPLETED,
+    },
+    _sum: {
+      amount: true,
+    },
+  });
+
+  return groupedTransactions.reduce<Map<string, number>>((balanceMap, item) => {
+    const currentBalance = balanceMap.get(item.spaceId) ?? 0;
+    const amount = Number(item._sum.amount ?? 0);
+    const nextBalance =
+      item.type === TransactionType.WITHDRAWAL
+        ? currentBalance - amount
+        : currentBalance + amount;
+
+    balanceMap.set(item.spaceId, nextBalance);
+    return balanceMap;
+  }, new Map<string, number>());
+};
+
+export const getCompletedBalanceForSpace = async (spaceId: string): Promise<number> => {
+  const balancesBySpaceId = await getCompletedBalancesBySpaceIds([spaceId]);
+  return balancesBySpaceId.get(spaceId) ?? 0;
+};
+
+export const storeWebhookPayload = async (payload: Record<string, unknown>): Promise<string> => {
+  const referenceValue = payload.receiptCode;
+  const reference =
+    typeof referenceValue === 'string' && referenceValue.trim().length > 0
+      ? referenceValue.trim()
+      : null;
+
+  const event = await prisma.webhookEvent.create({
+    data: {
+      provider: 'mpesa',
+      eventType: 'payment_confirmation',
+      reference,
+      status: 'received',
+      payload: payload as Prisma.InputJsonValue,
+    },
+  });
+
+  return event.id;
+};
+
+export const finalizeWebhookLog = async (
+  logId: string,
+  result: string,
+  metadata?: {
+    errorMessage?: string;
+    reference?: string | null;
+    spaceId?: string | null;
+    status?: string;
+  },
+): Promise<void> => {
+  await prisma.webhookEvent.update({
+    where: {
+      id: logId,
+    },
+    data: {
+      processedAt: new Date(),
+      status: metadata?.status ?? result,
+      reference: metadata?.reference ?? undefined,
+      spaceId: metadata?.spaceId ?? undefined,
+      errorMessage: metadata?.errorMessage ?? undefined,
+    },
+  });
 };
 
 const normalizePhoneNumber = (value: string): string => {
@@ -623,86 +704,148 @@ export const processMpesaWebhookPayment = async (
   accountNumber: string,
   phoneNumber: string,
   receiptCode: string,
-): Promise<{ deposit: Deposit | null; duplicate: boolean; group: Group }> => {
-  const group = groups.find((item) => item.accountNumber === accountNumber);
+  externalName?: string,
+): Promise<{ deposit: Transaction; duplicate: boolean; group: Group }> => {
+  const space = await prisma.space.findUnique({
+    where: {
+      accountNumber,
+    },
+  });
 
-  if (!group) {
+  if (!space) {
     throw createHttpError(404, 'Space not found for this account number');
   }
 
-  const existingTransaction = transactions.find(
-    (transaction) => transaction.reference === receiptCode,
-  );
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const existingTransaction = await prisma.transaction.findUnique({
+    where: {
+      reference: receiptCode,
+    },
+  });
 
   if (existingTransaction) {
-    return { deposit: null, duplicate: true, group };
+    if (existingTransaction.status === TransactionStatus.COMPLETED) {
+      return {
+        deposit: mapDbTransactionToContractTransaction(existingTransaction),
+        duplicate: true,
+        group: mapDbSpaceToGroup(space),
+      };
+    }
+
+    const completedTransaction = await prisma.transaction.update({
+      where: {
+        id: existingTransaction.id,
+      },
+      data: {
+        amount,
+        status: TransactionStatus.COMPLETED,
+        source: TransactionSource.MPESA_PAYBILL,
+        phoneNumber: normalizedPhoneNumber,
+        externalName,
+      },
+    });
+
+    return {
+      deposit: mapDbTransactionToContractTransaction(completedTransaction),
+      duplicate: false,
+      group: mapDbSpaceToGroup(space),
+    };
   }
 
-  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-  const matchedUser = await getUserByPhoneNumber(normalizedPhoneNumber);
-  const deposit: Deposit = {
-    id: `dep_${Date.now()}`,
-    spaceId: group.id,
-    userId: matchedUser?.id ?? `mpesa_${normalizedPhoneNumber}`,
-    amount,
-    status: 'completed',
-    createdAt: new Date().toISOString(),
-  };
-  const transaction: Transaction = {
-    id: createId('txn'),
-    spaceId: group.id,
-    userId: matchedUser?.id ?? undefined,
-    groupId: group.id,
-    initiatedByUserId: deposit.userId,
-    type: TransactionType.DEPOSIT,
-    amount,
-    currency: 'KES',
-    description: `M-Pesa Paybill deposit via ${group.paybillNumber}`,
-    source: TransactionSource.MPESA_PAYBILL,
-    reference: receiptCode,
-    phoneNumber: normalizedPhoneNumber,
-    status: TransactionStatus.COMPLETED,
-    createdAt: deposit.createdAt,
-  };
+  try {
+    const createdTransaction = await prisma.transaction.create({
+      data: {
+        spaceId: space.id,
+        userId: null,
+        type: TransactionType.DEPOSIT,
+        status: TransactionStatus.COMPLETED,
+        amount,
+        reference: receiptCode,
+        source: TransactionSource.MPESA_PAYBILL,
+        phoneNumber: normalizedPhoneNumber,
+        externalName,
+      },
+    });
 
-  deposits.push(deposit);
-  transactions.push(transaction);
-  group.collectedAmount = (group.collectedAmount ?? 0) + amount;
+    return {
+      deposit: mapDbTransactionToContractTransaction(createdTransaction),
+      duplicate: false,
+      group: mapDbSpaceToGroup(space),
+    };
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const duplicateTransaction = await prisma.transaction.findUnique({
+        where: {
+          reference: receiptCode,
+        },
+      });
 
-  return { deposit, duplicate: false, group };
+      if (!duplicateTransaction) {
+        throw error;
+      }
+
+      return {
+        deposit: mapDbTransactionToContractTransaction(duplicateTransaction),
+        duplicate: duplicateTransaction.status === TransactionStatus.COMPLETED,
+        group: mapDbSpaceToGroup(space),
+      };
+    }
+
+    throw error;
+  }
 };
 
 export const createDeposit = async (
   spaceId: string,
-  userId: string,
+  userId: string | null,
   amount: number,
-): Promise<Deposit> => {
+  options?: {
+    externalName?: string;
+    phoneNumber?: string;
+    reference?: string;
+    source?: TransactionSource;
+  },
+): Promise<Transaction> => {
   if (amount <= 0) {
     throw createHttpError(400, 'amount must be a positive number');
   }
 
-  const group = getGroupOrThrow(spaceId);
-  const deposit: Deposit = {
-    id: `dep_${Date.now()}`,
-    spaceId,
-    userId,
-    amount,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
 
-  deposits.push(deposit);
+  if (!space) {
+    throw createHttpError(404, 'Group not found');
+  }
 
-  setTimeout(() => {
-    if (deposit.status !== 'pending') {
-      return;
+  const reference = options?.reference?.trim() || createId('deposit_ref');
+  const transactionStatus = userId ? TransactionStatus.INITIATED : TransactionStatus.PENDING;
+
+  try {
+    const transaction = await prisma.transaction.create({
+      data: {
+        spaceId,
+        userId,
+        type: TransactionType.DEPOSIT,
+        status: transactionStatus,
+        amount,
+        reference,
+        source: options?.source ?? TransactionSource.MPESA_STK,
+        phoneNumber: options?.phoneNumber,
+        externalName: options?.externalName,
+      },
+    });
+
+    return mapDbTransactionToContractTransaction(transaction);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw createHttpError(409, 'A deposit with this reference already exists');
     }
 
-    deposit.status = 'completed';
-    group.collectedAmount = (group.collectedAmount ?? 0) + amount;
-  }, 2500);
-
-  return deposit;
+    throw error;
+  }
 };
 
 export const createWithdrawal = async (
@@ -790,15 +933,48 @@ export const approveWithdrawal = async (
 export const getTransactionsSummary = async (
   spaceId: string,
 ): Promise<TransactionsSummaryDto> => {
-  getGroupOrThrow(spaceId);
-  const completedDeposits = deposits.filter(
-    (deposit) => deposit.spaceId === spaceId && deposit.status === 'completed',
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
+
+  if (!space) {
+    throw createHttpError(404, 'Group not found');
+  }
+
+  const [completedTransactions, pendingDepositTransactions] = await Promise.all([
+    prisma.transaction.findMany({
+      where: {
+        spaceId,
+        status: TransactionStatus.COMPLETED,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    }),
+    prisma.transaction.findMany({
+      where: {
+        spaceId,
+        type: TransactionType.DEPOSIT,
+        status: {
+          in: [TransactionStatus.INITIATED, TransactionStatus.PENDING],
+        },
+      },
+      include: {
+        user: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    }),
+  ]);
+
+  const completedDeposits = completedTransactions.filter(
+    (transaction) => transaction.type === TransactionType.DEPOSIT,
   );
-  const pendingDeposits = deposits.filter(
-    (deposit) => deposit.spaceId === spaceId && deposit.status === 'pending',
-  );
-  const completedWithdrawals = withdrawals.filter(
-    (withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'completed',
+  const completedWithdrawals = completedTransactions.filter(
+    (transaction) => transaction.type === TransactionType.WITHDRAWAL,
   );
   const pendingWithdrawals = withdrawals
     .filter(
@@ -807,20 +983,24 @@ export const getTransactionsSummary = async (
         (withdrawal.status === 'pending' || withdrawal.status === 'approved'),
     );
   const pendingUserIds = [
-    ...pendingDeposits.map((deposit) => deposit.userId),
     ...pendingWithdrawals.map((withdrawal) => withdrawal.requestedByUserId),
   ];
   const usersById = await getUsersByIds(pendingUserIds);
-  const pendingDepositsSummary = pendingDeposits.map((deposit) => {
-    const user = usersById.get(deposit.userId);
+  const pendingDepositsSummary = pendingDepositTransactions.map((deposit) => {
+    const userName =
+      deposit.user?.name ??
+      deposit.externalName ??
+      deposit.phoneNumber ??
+      'External payer';
+    const derivedUserId = deposit.userId ?? `external_${deposit.id}`;
 
     return {
       id: deposit.id,
-      userId: deposit.userId,
-      userName: user?.name ?? deposit.userId,
-      amount: deposit.amount,
-      status: deposit.status,
-      createdAt: deposit.createdAt,
+      userId: derivedUserId,
+      userName,
+      amount: Number(deposit.amount),
+      status: 'pending' as const,
+      createdAt: deposit.createdAt.toISOString(),
     };
   });
   const pendingWithdrawalsSummary = pendingWithdrawals.map((withdrawal) => {
@@ -838,13 +1018,26 @@ export const getTransactionsSummary = async (
       createdAt: withdrawal.createdAt,
     };
   });
-  const totalDeposits = completedDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
-  const totalWithdrawals = completedWithdrawals.reduce(
-    (sum, withdrawal) => sum + withdrawal.amount,
+  const totalDeposits = completedDeposits.reduce(
+    (sum, deposit) => sum + Number(deposit.amount),
     0,
   );
-  const depositsOverTime = aggregateByDate(completedDeposits);
-  const withdrawalsOverTime = aggregateByDate(completedWithdrawals);
+  const totalWithdrawals = completedWithdrawals.reduce(
+    (sum, withdrawal) => sum + Number(withdrawal.amount),
+    0,
+  );
+  const depositsOverTime = aggregateByDate(
+    completedDeposits.map((deposit) => ({
+      amount: Number(deposit.amount),
+      createdAt: deposit.createdAt.toISOString(),
+    })),
+  );
+  const withdrawalsOverTime = aggregateByDate(
+    completedWithdrawals.map((withdrawal) => ({
+      amount: Number(withdrawal.amount),
+      createdAt: withdrawal.createdAt.toISOString(),
+    })),
+  );
 
   return {
     totalDeposits,
@@ -854,6 +1047,8 @@ export const getTransactionsSummary = async (
     withdrawalsOverTime,
     pendingWithdrawals: pendingWithdrawalsSummary,
     pendingDeposits: pendingDepositsSummary,
+    hasPendingTransactions:
+      pendingDepositsSummary.length > 0 || pendingWithdrawalsSummary.length > 0,
   } as TransactionsSummaryDto;
 };
 

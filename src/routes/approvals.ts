@@ -69,8 +69,11 @@ const requireTransactionById = (transactionId: string): Transaction => {
   return transaction;
 };
 
-const requireTransactionInGroup = (groupId: string, transactionId: string): Transaction => {
-  const transaction = getTransaction(groupId, transactionId);
+const requireTransactionInGroup = async (
+  groupId: string,
+  transactionId: string,
+): Promise<Transaction> => {
+  const transaction = await getTransaction(groupId, transactionId);
 
   if (!transaction) {
     throw createHttpError(404, 'Transaction not found');
@@ -146,7 +149,7 @@ router.post('/', async (req: Request<ApprovalParams>, res, next) => {
     };
 
     const approval = createApproval(transaction.id, user.id, dto);
-    const updatedTransaction = requireTransactionInGroup(groupId, transactionId);
+    const updatedTransaction = await requireTransactionInGroup(groupId, transactionId);
 
     const response: ApiResponse<CreateApprovalResponseDto> = {
       data: {

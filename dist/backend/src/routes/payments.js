@@ -53,7 +53,7 @@ router.post('/mpesa/webhook', async (req, res, next) => {
     let logId = null;
     try {
         const payload = (0, http_1.getObjectBody)(req.body);
-        logId = (0, groupService_1.storeWebhookPayload)(payload);
+        logId = await (0, groupService_1.storeWebhookPayload)(payload);
         const configuredSecret = process.env.MPESA_WEBHOOK_SECRET?.trim();
         const providedSecret = coerceNonEmptyString(req.header('x-webhook-secret'));
         if (!configuredSecret) {
@@ -75,6 +75,9 @@ router.post('/mpesa/webhook', async (req, res, next) => {
             coerceNonEmptyString(payload.MSISDN) ??
             coerceNonEmptyString(payload.phoneNumber) ??
             coerceNonEmptyString(getNestedValue(payload, ['MSISDN']));
+        const externalName = coerceNonEmptyString(payload.externalName) ??
+            coerceNonEmptyString(getNestedValue(payload, ['FirstName'])) ??
+            coerceNonEmptyString(getNestedValue(payload, ['firstName']));
         const receiptCode = coerceNonEmptyString(callbackMetadata.MpesaReceiptNumber) ??
             coerceNonEmptyString(payload.TransID) ??
             coerceNonEmptyString(payload.receiptCode) ??
@@ -82,8 +85,12 @@ router.post('/mpesa/webhook', async (req, res, next) => {
         if (!amount || !accountNumber || !phoneNumber || !receiptCode) {
             throw (0, http_1.createHttpError)(400, 'Invalid M-Pesa webhook payload');
         }
-        const result = await (0, groupService_1.processMpesaWebhookPayment)(amount, accountNumber, phoneNumber, receiptCode);
-        (0, groupService_1.finalizeWebhookLog)(logId, result.duplicate ? `duplicate:${receiptCode}` : `processed:${receiptCode}`);
+        const result = await (0, groupService_1.processMpesaWebhookPayment)(amount, accountNumber, phoneNumber, receiptCode, externalName ?? undefined);
+        await (0, groupService_1.finalizeWebhookLog)(logId, result.duplicate ? `duplicate:${receiptCode}` : `processed:${receiptCode}`, {
+            reference: receiptCode,
+            spaceId: result.group.id,
+            status: result.duplicate ? 'duplicate' : 'processed',
+        });
         console.info('M-Pesa webhook processed', {
             accountNumber,
             amount,
@@ -99,7 +106,10 @@ router.post('/mpesa/webhook', async (req, res, next) => {
     }
     catch (error) {
         if (logId) {
-            (0, groupService_1.finalizeWebhookLog)(logId, `failed:${error instanceof Error ? error.message : 'unknown error'}`);
+            await (0, groupService_1.finalizeWebhookLog)(logId, `failed:${error instanceof Error ? error.message : 'unknown error'}`, {
+                errorMessage: error instanceof Error ? error.message : 'unknown error',
+                status: 'failed',
+            });
         }
         console.error('M-Pesa webhook failed', {
             error: error instanceof Error ? error.message : 'unknown error',

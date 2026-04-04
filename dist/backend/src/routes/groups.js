@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const contracts_1 = require("../../../shared/contracts");
 const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const auth_1 = require("../utils/auth");
@@ -13,7 +14,7 @@ const getCurrentUser = async (headerValue) => {
 const getDefaultPaybillNumber = () => {
     return process.env.MPESA_PAYBILL?.trim() || '522522';
 };
-const mapSpaceToGroup = (space) => {
+const mapSpaceToGroup = (space, collectedAmount = 0) => {
     return {
         id: space.id,
         name: space.name,
@@ -22,7 +23,7 @@ const mapSpaceToGroup = (space) => {
         paybillNumber: space.paybillNumber ?? getDefaultPaybillNumber(),
         accountNumber: space.accountNumber ?? '',
         targetAmount: space.targetAmount ?? undefined,
-        collectedAmount: 0,
+        collectedAmount,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
         approvalThreshold: 1,
@@ -39,7 +40,8 @@ const getGroupById = async (groupId) => {
     if (!space) {
         throw (0, http_1.createHttpError)(404, 'Group not found');
     }
-    return mapSpaceToGroup(space);
+    const balancesBySpaceId = await (0, groupService_1.getCompletedBalancesBySpaceIds)([normalizedGroupId]);
+    return mapSpaceToGroup(space, balancesBySpaceId.get(normalizedGroupId) ?? 0);
 };
 const requireMembership = async (groupId, userId) => {
     const normalizedGroupId = (0, http_1.ensureNonEmptyString)(groupId, 'groupId is required');
@@ -158,9 +160,10 @@ router.get('/', async (req, res, next) => {
                 space: true,
             },
         });
+        const balancesBySpaceId = await (0, groupService_1.getCompletedBalancesBySpaceIds)(memberships.map((membership) => membership.space.id));
         const visibleGroups = Array.from(new Map(memberships.map((membership) => [
             membership.space.id,
-            mapSpaceToGroup(membership.space),
+            mapSpaceToGroup(membership.space, balancesBySpaceId.get(membership.space.id) ?? 0),
         ])).values());
         const response = {
             data: {
@@ -197,7 +200,13 @@ router.post('/:spaceId/deposit', async (req, res, next) => {
         await requireMembership(group.id, user.id);
         const body = (0, http_1.getObjectBody)(req.body);
         const amount = (0, http_1.ensurePositiveNumber)(body.amount, 'amount must be a positive number');
-        const deposit = await (0, groupService_1.createDeposit)(spaceId, user.id, amount);
+        const phoneNumber = (0, http_1.ensureOptionalNonEmptyString)(body.phoneNumber, 'phoneNumber must be a non-empty string');
+        const externalName = (0, http_1.ensureOptionalNonEmptyString)(body.externalName, 'externalName must be a non-empty string');
+        const deposit = await (0, groupService_1.createDeposit)(spaceId, user.id, amount, {
+            phoneNumber,
+            externalName,
+            source: contracts_1.TransactionSource.MPESA_STK,
+        });
         res.json({
             data: {
                 success: true,
