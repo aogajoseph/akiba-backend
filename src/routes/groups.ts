@@ -496,7 +496,7 @@ router.post('/:groupId/join', async (req: Request<GroupParams>, res, next) => {
 router.delete('/:groupId/members/:memberId/leave', async (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const member = await leaveSpace(req.params.groupId, req.params.memberId, user.id);
+    const member = await leaveSpace(req.params.groupId, user.id);
 
     const response: ApiResponse<LeaveGroupResponseDto> = {
       data: {

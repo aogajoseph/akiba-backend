@@ -60,6 +60,15 @@ const getMpesaPaybillNumber = (): string => {
   return process.env.MPESA_PAYBILL?.trim() || '522522';
 };
 
+const isUniqueConstraintError = (error: unknown): boolean => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2002'
+  );
+};
+
 const mapDbSpaceToGroup = (space: {
   accountNumber: string | null;
   createdAt: Date;
@@ -420,26 +429,32 @@ export const joinSpace = async (spaceId: string, userId: string): Promise<GroupM
     throw createHttpError(409, 'User is already a member of this group');
   }
 
-  const membership = await prisma.spaceMember.create({
-    data: {
-      spaceId,
-      userId,
-      role: 'member',
-    },
-  });
+  let membership;
+
+  try {
+    membership = await prisma.spaceMember.create({
+      data: {
+        spaceId,
+        userId,
+        role: 'member',
+      },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw createHttpError(409, 'User is already a member of this group');
+    }
+
+    throw error;
+  }
 
   return mapDbSpaceMemberToGroupMember(membership);
 };
 
-export const leaveSpace = async (
-  spaceId: string,
-  memberId: string,
-  requesterUserId: string,
-): Promise<GroupMember> => {
+export const leaveSpace = async (spaceId: string, userId: string): Promise<GroupMember> => {
   const membership = await prisma.spaceMember.findFirst({
     where: {
-      id: memberId,
       spaceId,
+      userId,
     },
     include: {
       space: true,
@@ -450,19 +465,26 @@ export const leaveSpace = async (
     throw createHttpError(404, 'Group member not found');
   }
 
-  if (membership.userId !== requesterUserId) {
-    throw createHttpError(403, 'Users can only leave a group for themselves');
-  }
-
   if (!membership.space) {
     throw createHttpError(404, 'Group not found');
   }
 
-  if (membership.space.createdById === requesterUserId) {
+  if (membership.space.createdById === userId) {
     throw createHttpError(409, 'Creator cannot leave group');
   }
 
   if (membership.role === 'admin') {
+    const adminCount = await prisma.spaceMember.count({
+      where: {
+        spaceId,
+        role: 'admin',
+      },
+    });
+
+    if (adminCount <= 1) {
+      throw createHttpError(409, 'At least one admin must remain in the group');
+    }
+
     throw createHttpError(409, 'Admins must be demoted before leaving the space');
   }
 
