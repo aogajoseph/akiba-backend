@@ -40,7 +40,6 @@ import {
   createWithdrawal,
   deleteGroup,
   getTransactionsSummary,
-  getSignatoryReport,
   joinGroup,
   leaveGroup,
   promoteMember,
@@ -101,9 +100,10 @@ const mapSpaceToGroup = (space: {
 };
 
 const getGroupById = async (groupId: string): Promise<Group> => {
+  const normalizedGroupId = ensureNonEmptyString(groupId, 'groupId is required');
   const space = await prisma.space.findUnique({
     where: {
-      id: groupId,
+      id: normalizedGroupId,
     },
   });
 
@@ -114,17 +114,23 @@ const getGroupById = async (groupId: string): Promise<Group> => {
   return mapSpaceToGroup(space);
 };
 
-const requireMembership = async (groupId: string, userId: string): Promise<void> => {
+const requireMembership = async (groupId: string, userId: string) => {
+  const normalizedGroupId = ensureNonEmptyString(groupId, 'groupId is required');
   const membership = await prisma.spaceMember.findFirst({
     where: {
-      spaceId: groupId,
+      spaceId: normalizedGroupId,
       userId,
+    },
+    include: {
+      space: true,
     },
   });
 
   if (!membership) {
     throw createHttpError(403, 'You are not a member of this group');
   }
+
+  return membership;
 };
 
 const toAdmin = (item: { userId: string; name: string }): SpaceAdmin => {
@@ -139,13 +145,30 @@ const buildAdminsResponse = async (
   groupId: string,
   userId: string,
 ): Promise<ApiResponse<ListGroupSignatoriesResponseDto>> => {
-  const report = await getSignatoryReport(groupId, userId);
-  const admins = report.signatories.map(toAdmin);
+  await getGroupById(groupId);
+  await requireMembership(groupId, userId);
+
+  const adminMembers = await prisma.spaceMember.findMany({
+    where: {
+      spaceId: groupId,
+      role: 'admin',
+    },
+    include: {
+      user: true,
+    },
+  });
+  const admins = adminMembers.map((member) =>
+    toAdmin({
+      userId: member.userId,
+      name: member.user?.name ?? member.userId,
+    }),
+  );
+  const remainingSlots = Math.max(0, 3 - admins.length);
 
   return {
     data: {
       admins,
-      remainingSlots: report.remainingSlots,
+      remainingSlots,
       signatories: admins,
     },
   };
@@ -355,8 +378,8 @@ router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
 router.get('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const group = await getGroupById(req.params.groupId);
-    await requireMembership(group.id, user.id);
+    const membership = await requireMembership(req.params.groupId, user.id);
+    const group = mapSpaceToGroup(membership.space);
 
     const response: ApiResponse<GetGroupResponseDto> = {
       data: {
