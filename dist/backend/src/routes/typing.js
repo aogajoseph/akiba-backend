@@ -38,11 +38,13 @@ router.get('/', async (req, res, next) => {
         const user = await getCurrentUser(req.header('x-user-id'));
         getGroupById(spaceId);
         requireMembership(spaceId, user.id);
+        const typingUserIds = Array.from(getTypingSet(spaceId));
+        const usersById = await (0, auth_1.getUsersByIds)(typingUserIds);
         const response = {
             data: {
-                users: Array.from(getTypingSet(spaceId))
+                users: typingUserIds
                     .map((userId) => {
-                    const typingUser = store_1.users.find((item) => item.id === userId);
+                    const typingUser = usersById.get(userId);
                     if (!typingUser) {
                         return null;
                     }

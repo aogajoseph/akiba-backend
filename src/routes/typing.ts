@@ -7,9 +7,9 @@ import {
   ListTypingUsersResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups, typingUsers, users } from '../data/store';
+import { groupMembers, groups, typingUsers } from '../data/store';
 import { createHttpError, ensureNonEmptyString } from '../utils/http';
-import { getCurrentUserOrThrow } from '../utils/auth';
+import { getCurrentUserOrThrow, getUsersByIds } from '../utils/auth';
 
 const router = Router({ mergeParams: true });
 
@@ -63,12 +63,14 @@ router.get('/', async (req: Request<TypingParams>, res, next) => {
     const user = await getCurrentUser(req.header('x-user-id'));
     getGroupById(spaceId);
     requireMembership(spaceId, user.id);
+    const typingUserIds = Array.from(getTypingSet(spaceId));
+    const usersById = await getUsersByIds(typingUserIds);
 
     const response: ApiResponse<ListTypingUsersResponseDto> = {
       data: {
-        users: Array.from(getTypingSet(spaceId))
+        users: typingUserIds
           .map((userId) => {
-            const typingUser = users.find((item) => item.id === userId);
+            const typingUser = usersById.get(userId);
 
             if (!typingUser) {
               return null;

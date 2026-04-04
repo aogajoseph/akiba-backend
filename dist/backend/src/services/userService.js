@@ -3,9 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteCurrentUser = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
+const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
-const deleteCurrentUser = (userId) => {
-    const user = store_1.users.find((item) => item.id === userId);
+const deleteCurrentUser = async (userId) => {
+    const user = await prisma_1.prisma.user.findUnique({
+        where: {
+            id: userId,
+        },
+    });
     if (!user) {
         throw (0, http_1.createHttpError)(404, 'User not found');
     }
@@ -21,8 +26,15 @@ const deleteCurrentUser = (userId) => {
     if (memberships.length > 0) {
         throw (0, http_1.createHttpError)(409, 'User must leave all groups before deleting account');
     }
+    await prisma_1.prisma.user.delete({
+        where: {
+            id: userId,
+        },
+    });
     const index = store_1.users.findIndex((item) => item.id === userId);
-    store_1.users.splice(index, 1);
+    if (index >= 0) {
+        store_1.users.splice(index, 1);
+    }
     return userId;
 };
 exports.deleteCurrentUser = deleteCurrentUser;

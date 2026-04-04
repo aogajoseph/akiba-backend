@@ -11,9 +11,10 @@ import {
   TransactionType,
   UpdateGroupRequestDto,
 } from '../../../shared/contracts';
-import { approvals, groupMembers, groups, messages, transactions, users } from '../data/store';
+import { approvals, groupMembers, groups, messages, transactions } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
 import { prisma } from '../lib/prisma';
+import { getUserByPhoneNumber, getUsersByIds } from '../utils/auth';
 
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
@@ -391,16 +392,18 @@ export const joinGroup = (groupId: string, userId: string): GroupMember => {
   return member;
 };
 
-export const getSignatoryReport = (
+export const getSignatoryReport = async (
   groupId: string,
   requesterUserId: string,
-): { signatories: GroupSignatory[]; remainingSlots: number } => {
+): Promise<{ signatories: GroupSignatory[]; remainingSlots: number }> => {
   getGroupOrThrow(groupId);
   requireRequesterMembership(groupId, requesterUserId);
 
-  const signatories = getSignatoriesForGroup(groupId)
+  const signatoryMembers = getSignatoriesForGroup(groupId);
+  const usersById = await getUsersByIds(signatoryMembers.map((member) => member.userId));
+  const signatories = signatoryMembers
     .map((member) => {
-      const user = users.find((item) => item.id === member.userId);
+      const user = usersById.get(member.userId);
 
       if (!user || member.signatoryRole === null) {
         return null;
@@ -441,9 +444,7 @@ export const processMpesaWebhookPayment = async (
   }
 
   const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-  const matchedUser = users.find(
-    (user) => normalizePhoneNumber(user.phoneNumber) === normalizedPhoneNumber,
-  );
+  const matchedUser = await getUserByPhoneNumber(normalizedPhoneNumber);
   const deposit: Deposit = {
     id: `dep_${Date.now()}`,
     spaceId: group.id,
@@ -596,20 +597,9 @@ export const getTransactionsSummary = async (
   const completedDeposits = deposits.filter(
     (deposit) => deposit.spaceId === spaceId && deposit.status === 'completed',
   );
-  const pendingDeposits = deposits
-    .filter((deposit) => deposit.spaceId === spaceId && deposit.status === 'pending')
-    .map((deposit) => {
-      const user = users.find((item) => item.id === deposit.userId);
-
-      return {
-        id: deposit.id,
-        userId: deposit.userId,
-        userName: user?.name ?? deposit.userId,
-        amount: deposit.amount,
-        status: deposit.status,
-        createdAt: deposit.createdAt,
-      };
-    });
+  const pendingDeposits = deposits.filter(
+    (deposit) => deposit.spaceId === spaceId && deposit.status === 'pending',
+  );
   const completedWithdrawals = withdrawals.filter(
     (withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'completed',
   );
@@ -618,22 +608,39 @@ export const getTransactionsSummary = async (
       (withdrawal) =>
         withdrawal.spaceId === spaceId &&
         (withdrawal.status === 'pending' || withdrawal.status === 'approved'),
-    )
-    .map((withdrawal) => {
-      const user = users.find((item) => item.id === withdrawal.requestedByUserId);
+    );
+  const pendingUserIds = [
+    ...pendingDeposits.map((deposit) => deposit.userId),
+    ...pendingWithdrawals.map((withdrawal) => withdrawal.requestedByUserId),
+  ];
+  const usersById = await getUsersByIds(pendingUserIds);
+  const pendingDepositsSummary = pendingDeposits.map((deposit) => {
+    const user = usersById.get(deposit.userId);
 
-      return {
-        id: withdrawal.id,
-        requestedByUserId: withdrawal.requestedByUserId,
-        requestedByName: user?.name ?? withdrawal.requestedByUserId,
-        amount: withdrawal.amount,
-        reason: withdrawal.reason,
-        approvals: withdrawal.approvals,
-        requiredApprovals: withdrawal.requiredApprovals,
-        status: withdrawal.status,
-        createdAt: withdrawal.createdAt,
-      };
-    });
+    return {
+      id: deposit.id,
+      userId: deposit.userId,
+      userName: user?.name ?? deposit.userId,
+      amount: deposit.amount,
+      status: deposit.status,
+      createdAt: deposit.createdAt,
+    };
+  });
+  const pendingWithdrawalsSummary = pendingWithdrawals.map((withdrawal) => {
+    const user = usersById.get(withdrawal.requestedByUserId);
+
+    return {
+      id: withdrawal.id,
+      requestedByUserId: withdrawal.requestedByUserId,
+      requestedByName: user?.name ?? withdrawal.requestedByUserId,
+      amount: withdrawal.amount,
+      reason: withdrawal.reason,
+      approvals: withdrawal.approvals,
+      requiredApprovals: withdrawal.requiredApprovals,
+      status: withdrawal.status,
+      createdAt: withdrawal.createdAt,
+    };
+  });
   const totalDeposits = completedDeposits.reduce((sum, deposit) => sum + deposit.amount, 0);
   const totalWithdrawals = completedWithdrawals.reduce(
     (sum, withdrawal) => sum + withdrawal.amount,
@@ -648,8 +655,8 @@ export const getTransactionsSummary = async (
     currentBalance: totalDeposits - totalWithdrawals,
     depositsOverTime,
     withdrawalsOverTime,
-    pendingWithdrawals,
-    pendingDeposits,
+    pendingWithdrawals: pendingWithdrawalsSummary,
+    pendingDeposits: pendingDepositsSummary,
   } as TransactionsSummaryDto;
 };
 

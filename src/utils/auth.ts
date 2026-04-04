@@ -3,12 +3,14 @@ import { users } from '../data/store';
 import { prisma } from '../lib/prisma';
 import { createHttpError } from './http';
 
-const mapDbUserToContractUser = (user: {
+type DbUserLike = {
   createdAt: Date;
   id: string;
   name: string | null;
   phone: string | null;
-}): User => {
+};
+
+export const mapDbUserToContractUser = (user: DbUserLike): User => {
   return {
     id: user.id,
     name: user.name ?? '',
@@ -43,4 +45,44 @@ export const getCurrentUserOrThrow = async (userId: string): Promise<User> => {
   syncUserCache(user);
 
   return user;
+};
+
+export const getUserByPhoneNumber = async (phoneNumber: string): Promise<User | null> => {
+  const dbUser = await prisma.user.findUnique({
+    where: {
+      phone: phoneNumber,
+    },
+  });
+
+  if (!dbUser) {
+    return null;
+  }
+
+  const user = mapDbUserToContractUser(dbUser);
+  syncUserCache(user);
+
+  return user;
+};
+
+export const getUsersByIds = async (userIds: string[]): Promise<Map<string, User>> => {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+
+  if (uniqueUserIds.length === 0) {
+    return new Map<string, User>();
+  }
+
+  const dbUsers = await prisma.user.findMany({
+    where: {
+      id: {
+        in: uniqueUserIds,
+      },
+    },
+  });
+
+  return dbUsers.reduce<Map<string, User>>((userMap, dbUser) => {
+    const user = mapDbUserToContractUser(dbUser);
+    syncUserCache(user);
+    userMap.set(user.id, user);
+    return userMap;
+  }, new Map<string, User>());
 };

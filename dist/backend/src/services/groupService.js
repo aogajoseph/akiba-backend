@@ -5,6 +5,7 @@ const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
 const prisma_1 = require("../lib/prisma");
+const auth_1 = require("../utils/auth");
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES = [
     'primary',
@@ -183,24 +184,27 @@ exports.createGroup = createGroup;
 const createSpace = async (input) => {
     const accountNumber = `AKB_${Date.now()}`;
     try {
-        const space = await prisma_1.prisma.space.create({
-            data: {
-                name: input.name,
-                description: input.description,
-                imageUrl: input.imageUrl,
-                targetAmount: input.targetAmount,
-                deadline: input.deadline ? new Date(input.deadline) : undefined,
-                paybillNumber: getMpesaPaybillNumber(),
-                accountNumber,
-                createdById: input.createdById,
-            },
-        });
-        await prisma_1.prisma.spaceMember.create({
-            data: {
-                spaceId: space.id,
-                userId: input.createdById,
-                role: 'admin',
-            },
+        const space = await prisma_1.prisma.$transaction(async (tx) => {
+            const createdSpace = await tx.space.create({
+                data: {
+                    name: input.name,
+                    description: input.description,
+                    imageUrl: input.imageUrl,
+                    targetAmount: input.targetAmount,
+                    deadline: input.deadline ? new Date(input.deadline) : undefined,
+                    paybillNumber: getMpesaPaybillNumber(),
+                    accountNumber,
+                    createdById: input.createdById,
+                },
+            });
+            await tx.spaceMember.create({
+                data: {
+                    spaceId: createdSpace.id,
+                    userId: input.createdById,
+                    role: 'admin',
+                },
+            });
+            return createdSpace;
         });
         return {
             space: {
@@ -269,12 +273,14 @@ const joinGroup = (groupId, userId) => {
     return member;
 };
 exports.joinGroup = joinGroup;
-const getSignatoryReport = (groupId, requesterUserId) => {
+const getSignatoryReport = async (groupId, requesterUserId) => {
     getGroupOrThrow(groupId);
     requireRequesterMembership(groupId, requesterUserId);
-    const signatories = getSignatoriesForGroup(groupId)
+    const signatoryMembers = getSignatoriesForGroup(groupId);
+    const usersById = await (0, auth_1.getUsersByIds)(signatoryMembers.map((member) => member.userId));
+    const signatories = signatoryMembers
         .map((member) => {
-        const user = store_1.users.find((item) => item.id === member.userId);
+        const user = usersById.get(member.userId);
         if (!user || member.signatoryRole === null) {
             return null;
         }
@@ -301,7 +307,7 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
         return { deposit: null, duplicate: true, group };
     }
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-    const matchedUser = store_1.users.find((user) => normalizePhoneNumber(user.phoneNumber) === normalizedPhoneNumber);
+    const matchedUser = await (0, auth_1.getUserByPhoneNumber)(normalizedPhoneNumber);
     const deposit = {
         id: `dep_${Date.now()}`,
         spaceId: group.id,
@@ -415,10 +421,18 @@ exports.approveWithdrawal = approveWithdrawal;
 const getTransactionsSummary = async (spaceId) => {
     getGroupOrThrow(spaceId);
     const completedDeposits = deposits.filter((deposit) => deposit.spaceId === spaceId && deposit.status === 'completed');
-    const pendingDeposits = deposits
-        .filter((deposit) => deposit.spaceId === spaceId && deposit.status === 'pending')
-        .map((deposit) => {
-        const user = store_1.users.find((item) => item.id === deposit.userId);
+    const pendingDeposits = deposits.filter((deposit) => deposit.spaceId === spaceId && deposit.status === 'pending');
+    const completedWithdrawals = withdrawals.filter((withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'completed');
+    const pendingWithdrawals = withdrawals
+        .filter((withdrawal) => withdrawal.spaceId === spaceId &&
+        (withdrawal.status === 'pending' || withdrawal.status === 'approved'));
+    const pendingUserIds = [
+        ...pendingDeposits.map((deposit) => deposit.userId),
+        ...pendingWithdrawals.map((withdrawal) => withdrawal.requestedByUserId),
+    ];
+    const usersById = await (0, auth_1.getUsersByIds)(pendingUserIds);
+    const pendingDepositsSummary = pendingDeposits.map((deposit) => {
+        const user = usersById.get(deposit.userId);
         return {
             id: deposit.id,
             userId: deposit.userId,
@@ -428,12 +442,8 @@ const getTransactionsSummary = async (spaceId) => {
             createdAt: deposit.createdAt,
         };
     });
-    const completedWithdrawals = withdrawals.filter((withdrawal) => withdrawal.spaceId === spaceId && withdrawal.status === 'completed');
-    const pendingWithdrawals = withdrawals
-        .filter((withdrawal) => withdrawal.spaceId === spaceId &&
-        (withdrawal.status === 'pending' || withdrawal.status === 'approved'))
-        .map((withdrawal) => {
-        const user = store_1.users.find((item) => item.id === withdrawal.requestedByUserId);
+    const pendingWithdrawalsSummary = pendingWithdrawals.map((withdrawal) => {
+        const user = usersById.get(withdrawal.requestedByUserId);
         return {
             id: withdrawal.id,
             requestedByUserId: withdrawal.requestedByUserId,
@@ -456,8 +466,8 @@ const getTransactionsSummary = async (spaceId) => {
         currentBalance: totalDeposits - totalWithdrawals,
         depositsOverTime,
         withdrawalsOverTime,
-        pendingWithdrawals,
-        pendingDeposits,
+        pendingWithdrawals: pendingWithdrawalsSummary,
+        pendingDeposits: pendingDepositsSummary,
     };
 };
 exports.getTransactionsSummary = getTransactionsSummary;

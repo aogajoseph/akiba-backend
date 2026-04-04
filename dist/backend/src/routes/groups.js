@@ -31,15 +31,8 @@ const toAdmin = (item) => {
         role: 'admin',
     };
 };
-const toSpaceMember = (member) => {
-    const user = store_1.users.find((item) => item.id === member.userId);
-    return {
-        ...member,
-        name: user?.name ?? member.userId,
-    };
-};
-const buildAdminsResponse = (groupId, userId) => {
-    const report = (0, groupService_1.getSignatoryReport)(groupId, userId);
+const buildAdminsResponse = async (groupId, userId) => {
+    const report = await (0, groupService_1.getSignatoryReport)(groupId, userId);
     const admins = report.signatories.map(toAdmin);
     return {
         data: {
@@ -312,9 +305,14 @@ router.get('/:groupId/members', async (req, res, next) => {
         const user = await getCurrentUser(req.header('x-user-id'));
         const group = getGroupById(req.params.groupId);
         requireMembership(group.id, user.id);
+        const groupSpaceMembers = store_1.groupMembers.filter((item) => item.groupId === group.id);
+        const usersById = await (0, auth_1.getUsersByIds)(groupSpaceMembers.map((member) => member.userId));
         const members = store_1.groupMembers
             .filter((item) => item.groupId === group.id)
-            .map(toSpaceMember);
+            .map((member) => ({
+            ...member,
+            name: usersById.get(member.userId)?.name ?? member.userId,
+        }));
         const response = {
             data: {
                 members,
@@ -329,7 +327,7 @@ router.get('/:groupId/members', async (req, res, next) => {
 router.get('/:groupId/signatories', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        res.json(buildAdminsResponse(req.params.groupId, user.id));
+        res.json(await buildAdminsResponse(req.params.groupId, user.id));
     }
     catch (error) {
         next(error);
@@ -338,7 +336,7 @@ router.get('/:groupId/signatories', async (req, res, next) => {
 router.get('/:groupId/admins', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        res.json(buildAdminsResponse(req.params.groupId, user.id));
+        res.json(await buildAdminsResponse(req.params.groupId, user.id));
     }
     catch (error) {
         next(error);

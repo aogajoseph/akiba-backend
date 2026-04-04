@@ -1,9 +1,14 @@
 import { GroupRole } from '../../../shared/contracts';
 import { groupMembers, groups, users } from '../data/store';
+import { prisma } from '../lib/prisma';
 import { createHttpError } from '../utils/http';
 
-export const deleteCurrentUser = (userId: string): string => {
-  const user = users.find((item) => item.id === userId);
+export const deleteCurrentUser = async (userId: string): Promise<string> => {
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+  });
 
   if (!user) {
     throw createHttpError(404, 'User not found');
@@ -26,8 +31,17 @@ export const deleteCurrentUser = (userId: string): string => {
     throw createHttpError(409, 'User must leave all groups before deleting account');
   }
 
+  await prisma.user.delete({
+    where: {
+      id: userId,
+    },
+  });
+
   const index = users.findIndex((item) => item.id === userId);
-  users.splice(index, 1);
+
+  if (index >= 0) {
+    users.splice(index, 1);
+  }
 
   return userId;
 };

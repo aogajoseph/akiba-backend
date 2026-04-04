@@ -22,7 +22,7 @@ import {
   UpdateGroupResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups, users } from '../data/store';
+import { groupMembers, groups } from '../data/store';
 import {
   createHttpError,
   ensureNonEmptyString,
@@ -31,7 +31,7 @@ import {
   ensurePositiveNumber,
   getObjectBody,
 } from '../utils/http';
-import { getCurrentUserOrThrow } from '../utils/auth';
+import { getCurrentUserOrThrow, getUsersByIds } from '../utils/auth';
 import {
   approveWithdrawal,
   createDeposit,
@@ -97,17 +97,11 @@ const toAdmin = (item: { userId: string; name: string }): SpaceAdmin => {
   };
 };
 
-const toSpaceMember = (member: GroupMember): SpaceMember => {
-  const user = users.find((item) => item.id === member.userId);
-
-  return {
-    ...member,
-    name: user?.name ?? member.userId,
-  };
-};
-
-const buildAdminsResponse = (groupId: string, userId: string): ApiResponse<ListGroupSignatoriesResponseDto> => {
-  const report = getSignatoryReport(groupId, userId);
+const buildAdminsResponse = async (
+  groupId: string,
+  userId: string,
+): Promise<ApiResponse<ListGroupSignatoriesResponseDto>> => {
+  const report = await getSignatoryReport(groupId, userId);
   const admins = report.signatories.map(toAdmin);
 
   return {
@@ -460,9 +454,14 @@ router.get('/:groupId/members', async (req: Request<GroupParams>, res, next) => 
     const group = getGroupById(req.params.groupId);
     requireMembership(group.id, user.id);
 
+    const groupSpaceMembers = groupMembers.filter((item) => item.groupId === group.id);
+    const usersById = await getUsersByIds(groupSpaceMembers.map((member) => member.userId));
     const members = groupMembers
       .filter((item) => item.groupId === group.id)
-      .map(toSpaceMember);
+      .map((member) => ({
+        ...member,
+        name: usersById.get(member.userId)?.name ?? member.userId,
+      }));
     const response: ApiResponse<ListGroupMembersResponseDto> = {
       data: {
         members,
@@ -478,7 +477,7 @@ router.get('/:groupId/members', async (req: Request<GroupParams>, res, next) => 
 router.get('/:groupId/signatories', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    res.json(buildAdminsResponse(req.params.groupId, user.id));
+    res.json(await buildAdminsResponse(req.params.groupId, user.id));
   } catch (error) {
     next(error);
   }
@@ -487,7 +486,7 @@ router.get('/:groupId/signatories', async (req: Request<GroupParams>, res, next)
 router.get('/:groupId/admins', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    res.json(buildAdminsResponse(req.params.groupId, user.id));
+    res.json(await buildAdminsResponse(req.params.groupId, user.id));
   } catch (error) {
     next(error);
   }
