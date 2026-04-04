@@ -11,6 +11,26 @@ datasource db {
   provider = "postgresql"
 }
 
+enum TransactionType {
+  deposit
+  withdrawal
+}
+
+enum TransactionStatus {
+  initiated
+  pending
+  completed
+  failed
+  reversed
+}
+
+enum TransactionSource {
+  mpesa_paybill
+  mpesa_stk
+  card
+  bank_transfer
+}
+
 model User {
   id        String   @id @default(uuid())
   name      String?
@@ -55,19 +75,17 @@ model SpaceMember {
 }
 
 model Transaction {
-  id            String   @id @default(uuid())
+  id            String            @id @default(uuid())
   spaceId       String
   userId        String?
-
-  type          String   // deposit | withdrawal
-  amount        Float
-  status        String   // pending | approved | completed
-
-  source        String   // mpesa_stk | mpesa_paybill | bank_transfer | card
-  reference     String?  @unique
+  type          TransactionType
+  status        TransactionStatus
+  amount        Decimal           @db.Decimal(18, 2)
+  reference     String            @unique
+  source        TransactionSource
   phoneNumber   String?
-
-  createdAt     DateTime @default(now())
+  externalName  String?
+  createdAt     DateTime          @default(now())
 
   space Space @relation(fields: [spaceId], references: [id])
   user  User? @relation(fields: [userId], references: [id])

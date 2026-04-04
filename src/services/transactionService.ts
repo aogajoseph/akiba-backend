@@ -3,6 +3,7 @@ import {
   CreateWithdrawalRequestDto,
   GetTransactionsSummaryResponseDto,
   Transaction,
+  TransactionSource,
   TransactionStatus,
   TransactionType,
 } from '../../../shared/contracts';
@@ -16,10 +17,14 @@ export const createDeposit = (
 ): Transaction => {
   const transaction: Transaction = {
     id: createId('txn'),
+    spaceId: groupId,
+    userId,
     groupId,
     initiatedByUserId: userId,
     type: TransactionType.DEPOSIT,
     amount: dto.amount,
+    reference: createId('deposit_ref'),
+    source: TransactionSource.MPESA_STK,
     currency: dto.currency,
     description: dto.description,
     status: TransactionStatus.COMPLETED,
@@ -38,10 +43,14 @@ export const createWithdrawal = (
 ): Transaction => {
   const transaction: Transaction = {
     id: createId('txn'),
+    spaceId: groupId,
+    userId,
     groupId,
     initiatedByUserId: userId,
     type: TransactionType.WITHDRAWAL,
     amount: dto.amount,
+    reference: createId('withdrawal_ref'),
+    source: TransactionSource.BANK_TRANSFER,
     currency: dto.currency,
     description: dto.description,
     destination: dto.destination,

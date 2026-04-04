@@ -461,13 +461,15 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
     };
     const transaction = {
         id: (0, http_1.createId)('txn'),
+        spaceId: group.id,
+        userId: matchedUser?.id ?? undefined,
         groupId: group.id,
         initiatedByUserId: deposit.userId,
         type: contracts_1.TransactionType.DEPOSIT,
         amount,
         currency: 'KES',
         description: `M-Pesa Paybill deposit via ${group.paybillNumber}`,
-        source: 'mpesa_paybill',
+        source: contracts_1.TransactionSource.MPESA_PAYBILL,
         reference: receiptCode,
         phoneNumber: normalizedPhoneNumber,
         status: contracts_1.TransactionStatus.COMPLETED,

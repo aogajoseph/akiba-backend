@@ -7,10 +7,14 @@ const http_1 = require("../utils/http");
 const createDeposit = (groupId, userId, dto) => {
     const transaction = {
         id: (0, http_1.createId)('txn'),
+        spaceId: groupId,
+        userId,
         groupId,
         initiatedByUserId: userId,
         type: contracts_1.TransactionType.DEPOSIT,
         amount: dto.amount,
+        reference: (0, http_1.createId)('deposit_ref'),
+        source: contracts_1.TransactionSource.MPESA_STK,
         currency: dto.currency,
         description: dto.description,
         status: contracts_1.TransactionStatus.COMPLETED,
@@ -23,10 +27,14 @@ exports.createDeposit = createDeposit;
 const createWithdrawal = (groupId, userId, dto) => {
     const transaction = {
         id: (0, http_1.createId)('txn'),
+        spaceId: groupId,
+        userId,
         groupId,
         initiatedByUserId: userId,
         type: contracts_1.TransactionType.WITHDRAWAL,
         amount: dto.amount,
+        reference: (0, http_1.createId)('withdrawal_ref'),
+        source: contracts_1.TransactionSource.BANK_TRANSFER,
         currency: dto.currency,
         description: dto.description,
         destination: dto.destination,
