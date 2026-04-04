@@ -8,7 +8,6 @@ import {
   GetGroupResponseDto,
   GetTransactionsSummaryResponseDto,
   Group,
-  GroupMember,
   JoinGroupResponseDto,
   LeaveGroupResponseDto,
   ListGroupMembersResponseDto,
@@ -17,12 +16,10 @@ import {
   PromoteGroupMemberResponseDto,
   RevokeGroupMemberResponseDto,
   SpaceAdmin,
-  SpaceMember,
   UpdateGroupRequestDto,
   UpdateGroupResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers } from '../data/store';
 import { prisma } from '../lib/prisma';
 import {
   createHttpError,
@@ -32,7 +29,7 @@ import {
   ensurePositiveNumber,
   getObjectBody,
 } from '../utils/http';
-import { getCurrentUserOrThrow, getUsersByIds } from '../utils/auth';
+import { getCurrentUserOrThrow } from '../utils/auth';
 import {
   approveWithdrawal,
   createDeposit,
@@ -40,8 +37,9 @@ import {
   createWithdrawal,
   deleteGroup,
   getTransactionsSummary,
-  joinGroup,
-  leaveGroup,
+  getSpaceMembers,
+  joinSpace,
+  leaveSpace,
   promoteMember,
   revokeMember,
   updateGroup,
@@ -481,16 +479,7 @@ router.post('/:groupId/join', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
     const group = await getGroupById(req.params.groupId);
-
-    const existingMembership = groupMembers.find(
-      (item) => item.groupId === group.id && item.userId === user.id,
-    );
-
-    if (existingMembership) {
-      throw createHttpError(409, 'User is already a member of this group');
-    }
-
-    const member = joinGroup(group.id, user.id);
+    const member = await joinSpace(group.id, user.id);
 
     const response: ApiResponse<JoinGroupResponseDto> = {
       data: {
@@ -507,7 +496,7 @@ router.post('/:groupId/join', async (req: Request<GroupParams>, res, next) => {
 router.delete('/:groupId/members/:memberId/leave', async (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const member = leaveGroup(req.params.groupId, req.params.memberId, user.id);
+    const member = await leaveSpace(req.params.groupId, req.params.memberId, user.id);
 
     const response: ApiResponse<LeaveGroupResponseDto> = {
       data: {
@@ -526,15 +515,7 @@ router.get('/:groupId/members', async (req: Request<GroupParams>, res, next) => 
     const user = await getCurrentUser(req.header('x-user-id'));
     const group = await getGroupById(req.params.groupId);
     await requireMembership(group.id, user.id);
-
-    const groupSpaceMembers = groupMembers.filter((item) => item.groupId === group.id);
-    const usersById = await getUsersByIds(groupSpaceMembers.map((member) => member.userId));
-    const members = groupMembers
-      .filter((item) => item.groupId === group.id)
-      .map((member) => ({
-        ...member,
-        name: usersById.get(member.userId)?.name ?? member.userId,
-      }));
+    const members = await getSpaceMembers(group.id);
     const response: ApiResponse<ListGroupMembersResponseDto> = {
       data: {
         members,

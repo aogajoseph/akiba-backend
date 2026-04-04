@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -18,6 +18,39 @@ const withdrawals = [];
 const webhookLogs = [];
 const getMpesaPaybillNumber = () => {
     return process.env.MPESA_PAYBILL?.trim() || '522522';
+};
+const mapDbSpaceToGroup = (space) => {
+    return {
+        id: space.id,
+        name: space.name,
+        description: space.description ?? undefined,
+        imageUrl: space.imageUrl ?? undefined,
+        paybillNumber: space.paybillNumber ?? getMpesaPaybillNumber(),
+        accountNumber: space.accountNumber ?? '',
+        targetAmount: space.targetAmount ?? undefined,
+        collectedAmount: 0,
+        deadline: space.deadline?.toISOString(),
+        createdByUserId: space.createdById,
+        approvalThreshold: 1,
+        createdAt: space.createdAt.toISOString(),
+    };
+};
+const mapDbSpaceMemberToGroupMember = (member) => {
+    const isAdmin = member.role === 'admin';
+    return {
+        id: member.id,
+        groupId: member.spaceId,
+        userId: member.userId,
+        role: isAdmin ? contracts_1.GroupRole.SIGNATORY : contracts_1.GroupRole.MEMBER,
+        signatoryRole: isAdmin ? 'primary' : null,
+        joinedAt: member.createdAt.toISOString(),
+    };
+};
+const mapDbSpaceMemberToSpaceMember = (member) => {
+    return {
+        ...mapDbSpaceMemberToGroupMember(member),
+        name: member.user?.name ?? member.userId,
+    };
 };
 const storeWebhookPayload = (payload) => {
     const logId = (0, http_1.createId)('mpesa_webhook');
@@ -229,6 +262,95 @@ const createSpace = async (input) => {
     }
 };
 exports.createSpace = createSpace;
+const joinSpace = async (spaceId, userId) => {
+    const space = await prisma_1.prisma.space.findUnique({
+        where: {
+            id: spaceId,
+        },
+    });
+    if (!space) {
+        throw (0, http_1.createHttpError)(404, 'Group not found');
+    }
+    const existingMembership = await prisma_1.prisma.spaceMember.findFirst({
+        where: {
+            spaceId,
+            userId,
+        },
+    });
+    if (existingMembership) {
+        throw (0, http_1.createHttpError)(409, 'User is already a member of this group');
+    }
+    const membership = await prisma_1.prisma.spaceMember.create({
+        data: {
+            spaceId,
+            userId,
+            role: 'member',
+        },
+    });
+    return mapDbSpaceMemberToGroupMember(membership);
+};
+exports.joinSpace = joinSpace;
+const leaveSpace = async (spaceId, memberId, requesterUserId) => {
+    const membership = await prisma_1.prisma.spaceMember.findFirst({
+        where: {
+            id: memberId,
+            spaceId,
+        },
+        include: {
+            space: true,
+        },
+    });
+    if (!membership) {
+        throw (0, http_1.createHttpError)(404, 'Group member not found');
+    }
+    if (membership.userId !== requesterUserId) {
+        throw (0, http_1.createHttpError)(403, 'Users can only leave a group for themselves');
+    }
+    if (!membership.space) {
+        throw (0, http_1.createHttpError)(404, 'Group not found');
+    }
+    if (membership.space.createdById === requesterUserId) {
+        throw (0, http_1.createHttpError)(409, 'Creator cannot leave group');
+    }
+    if (membership.role === 'admin') {
+        throw (0, http_1.createHttpError)(409, 'Admins must be demoted before leaving the space');
+    }
+    await prisma_1.prisma.spaceMember.delete({
+        where: {
+            id: membership.id,
+        },
+    });
+    return mapDbSpaceMemberToGroupMember(membership);
+};
+exports.leaveSpace = leaveSpace;
+const getSpaceMembers = async (spaceId) => {
+    const space = await prisma_1.prisma.space.findUnique({
+        where: {
+            id: spaceId,
+        },
+    });
+    if (!space) {
+        throw (0, http_1.createHttpError)(404, 'Group not found');
+    }
+    const members = await prisma_1.prisma.spaceMember.findMany({
+        where: {
+            spaceId,
+        },
+        include: {
+            user: true,
+        },
+        orderBy: [
+            {
+                role: 'asc',
+            },
+            {
+                createdAt: 'asc',
+            },
+        ],
+    });
+    return members.map(mapDbSpaceMemberToSpaceMember);
+};
+exports.getSpaceMembers = getSpaceMembers;
 const updateGroup = (groupId, actorUserId, dto) => {
     const group = getGroupOrThrow(groupId);
     requireRequesterMembership(groupId, actorUserId);

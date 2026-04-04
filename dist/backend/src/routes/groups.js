@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const store_1 = require("../data/store");
 const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const auth_1 = require("../utils/auth");
@@ -327,11 +326,7 @@ router.post('/:groupId/join', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
         const group = await getGroupById(req.params.groupId);
-        const existingMembership = store_1.groupMembers.find((item) => item.groupId === group.id && item.userId === user.id);
-        if (existingMembership) {
-            throw (0, http_1.createHttpError)(409, 'User is already a member of this group');
-        }
-        const member = (0, groupService_1.joinGroup)(group.id, user.id);
+        const member = await (0, groupService_1.joinSpace)(group.id, user.id);
         const response = {
             data: {
                 member,
@@ -346,7 +341,7 @@ router.post('/:groupId/join', async (req, res, next) => {
 router.delete('/:groupId/members/:memberId/leave', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        const member = (0, groupService_1.leaveGroup)(req.params.groupId, req.params.memberId, user.id);
+        const member = await (0, groupService_1.leaveSpace)(req.params.groupId, req.params.memberId, user.id);
         const response = {
             data: {
                 member,
@@ -363,14 +358,7 @@ router.get('/:groupId/members', async (req, res, next) => {
         const user = await getCurrentUser(req.header('x-user-id'));
         const group = await getGroupById(req.params.groupId);
         await requireMembership(group.id, user.id);
-        const groupSpaceMembers = store_1.groupMembers.filter((item) => item.groupId === group.id);
-        const usersById = await (0, auth_1.getUsersByIds)(groupSpaceMembers.map((member) => member.userId));
-        const members = store_1.groupMembers
-            .filter((item) => item.groupId === group.id)
-            .map((member) => ({
-            ...member,
-            name: usersById.get(member.userId)?.name ?? member.userId,
-        }));
+        const members = await (0, groupService_1.getSpaceMembers)(group.id);
         const response = {
             data: {
                 members,

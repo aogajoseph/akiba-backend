@@ -5,6 +5,7 @@ import {
   GroupRole,
   GroupSignatory,
   SignatoryRole,
+  SpaceMember as SpaceMemberDto,
   Transaction,
   TransactionsSummaryDto,
   TransactionStatus,
@@ -57,6 +58,69 @@ const webhookLogs: Array<{
 
 const getMpesaPaybillNumber = (): string => {
   return process.env.MPESA_PAYBILL?.trim() || '522522';
+};
+
+const mapDbSpaceToGroup = (space: {
+  accountNumber: string | null;
+  createdAt: Date;
+  createdById: string;
+  deadline: Date | null;
+  description: string | null;
+  id: string;
+  imageUrl: string | null;
+  name: string;
+  paybillNumber: string | null;
+  targetAmount: number | null;
+}): Group => {
+  return {
+    id: space.id,
+    name: space.name,
+    description: space.description ?? undefined,
+    imageUrl: space.imageUrl ?? undefined,
+    paybillNumber: space.paybillNumber ?? getMpesaPaybillNumber(),
+    accountNumber: space.accountNumber ?? '',
+    targetAmount: space.targetAmount ?? undefined,
+    collectedAmount: 0,
+    deadline: space.deadline?.toISOString(),
+    createdByUserId: space.createdById,
+    approvalThreshold: 1,
+    createdAt: space.createdAt.toISOString(),
+  };
+};
+
+const mapDbSpaceMemberToGroupMember = (member: {
+  createdAt: Date;
+  id: string;
+  role: string;
+  spaceId: string;
+  userId: string;
+}): GroupMember => {
+  const isAdmin = member.role === 'admin';
+
+  return {
+    id: member.id,
+    groupId: member.spaceId,
+    userId: member.userId,
+    role: isAdmin ? GroupRole.SIGNATORY : GroupRole.MEMBER,
+    signatoryRole: isAdmin ? 'primary' : null,
+    joinedAt: member.createdAt.toISOString(),
+  };
+};
+
+const mapDbSpaceMemberToSpaceMember = (member: {
+  createdAt: Date;
+  id: string;
+  role: string;
+  spaceId: string;
+  user: {
+    name: string | null;
+  } | null;
+  userId: string;
+}): SpaceMemberDto => {
+  return {
+    ...mapDbSpaceMemberToGroupMember(member),
+    name: member.user?.name ?? member.userId,
+  };
 };
 
 export const storeWebhookPayload = (payload: Record<string, unknown>): string => {
@@ -332,6 +396,114 @@ export const createSpace = async (input: {
     const message = error instanceof Error ? error.message : 'Unknown error';
     throw createHttpError(500, `Failed to create space: ${message}`);
   }
+};
+
+export const joinSpace = async (spaceId: string, userId: string): Promise<GroupMember> => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
+
+  if (!space) {
+    throw createHttpError(404, 'Group not found');
+  }
+
+  const existingMembership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId,
+      userId,
+    },
+  });
+
+  if (existingMembership) {
+    throw createHttpError(409, 'User is already a member of this group');
+  }
+
+  const membership = await prisma.spaceMember.create({
+    data: {
+      spaceId,
+      userId,
+      role: 'member',
+    },
+  });
+
+  return mapDbSpaceMemberToGroupMember(membership);
+};
+
+export const leaveSpace = async (
+  spaceId: string,
+  memberId: string,
+  requesterUserId: string,
+): Promise<GroupMember> => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      id: memberId,
+      spaceId,
+    },
+    include: {
+      space: true,
+    },
+  });
+
+  if (!membership) {
+    throw createHttpError(404, 'Group member not found');
+  }
+
+  if (membership.userId !== requesterUserId) {
+    throw createHttpError(403, 'Users can only leave a group for themselves');
+  }
+
+  if (!membership.space) {
+    throw createHttpError(404, 'Group not found');
+  }
+
+  if (membership.space.createdById === requesterUserId) {
+    throw createHttpError(409, 'Creator cannot leave group');
+  }
+
+  if (membership.role === 'admin') {
+    throw createHttpError(409, 'Admins must be demoted before leaving the space');
+  }
+
+  await prisma.spaceMember.delete({
+    where: {
+      id: membership.id,
+    },
+  });
+
+  return mapDbSpaceMemberToGroupMember(membership);
+};
+
+export const getSpaceMembers = async (spaceId: string): Promise<SpaceMemberDto[]> => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
+
+  if (!space) {
+    throw createHttpError(404, 'Group not found');
+  }
+
+  const members = await prisma.spaceMember.findMany({
+    where: {
+      spaceId,
+    },
+    include: {
+      user: true,
+    },
+    orderBy: [
+      {
+        role: 'asc',
+      },
+      {
+        createdAt: 'asc',
+      },
+    ],
+  });
+
+  return members.map(mapDbSpaceMemberToSpaceMember);
 };
 
 export const updateGroup = (
