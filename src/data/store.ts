@@ -4,10 +4,8 @@ import {
   GroupMember,
   Message,
   Transaction,
-  User,
 } from '../../../shared/contracts';
 
-export const users: User[] = [];
 export const groups: Group[] = [];
 export const groupMembers: GroupMember[] = [];
 export const transactions: Transaction[] = [];

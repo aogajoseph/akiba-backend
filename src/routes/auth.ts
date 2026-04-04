@@ -7,10 +7,9 @@ import {
   MeResponseDto,
   RegisterRequestDto,
   RegisterResponseDto,
-  User,
 } from '../../../shared/contracts';
-import { users } from '../data/store';
 import { prisma } from '../lib/prisma';
+import { mapDbUserToContractUser } from '../utils/auth';
 import {
   createHttpError,
   ensureNonEmptyString,
@@ -18,31 +17,6 @@ import {
 } from '../utils/http';
 
 const router = Router();
-
-const mapDbUserToContractUser = (user: {
-  createdAt: Date;
-  id: string;
-  name: string | null;
-  phone: string | null;
-}): User => {
-  return {
-    id: user.id,
-    name: user.name ?? '',
-    phoneNumber: user.phone ?? '',
-    createdAt: user.createdAt.toISOString(),
-  };
-};
-
-const syncUserCache = (user: User): void => {
-  const existingIndex = users.findIndex((item) => item.id === user.id);
-
-  if (existingIndex >= 0) {
-    users[existingIndex] = user;
-    return;
-  }
-
-  users.push(user);
-};
 
 const isUniqueConstraintError = (error: unknown): boolean => {
   return (
@@ -79,7 +53,6 @@ router.post('/register', async (req, res, next) => {
     }
 
     const user = mapDbUserToContractUser(createdUser);
-    syncUserCache(user);
 
     const response: ApiResponse<RegisterResponseDto> = {
       data: {
@@ -112,7 +85,6 @@ router.post('/login', async (req, res, next) => {
     }
 
     const user = mapDbUserToContractUser(dbUser);
-    syncUserCache(user);
 
     const response: ApiResponse<LoginResponseDto> = {
       data: {
@@ -141,7 +113,6 @@ router.get('/me', async (req, res, next) => {
     }
 
     const user = mapDbUserToContractUser(dbUser);
-    syncUserCache(user);
 
     const response: ApiResponse<MeResponseDto> = {
       data: {

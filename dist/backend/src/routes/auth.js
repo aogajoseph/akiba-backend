@@ -1,26 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const store_1 = require("../data/store");
 const prisma_1 = require("../lib/prisma");
+const auth_1 = require("../utils/auth");
 const http_1 = require("../utils/http");
 const router = (0, express_1.Router)();
-const mapDbUserToContractUser = (user) => {
-    return {
-        id: user.id,
-        name: user.name ?? '',
-        phoneNumber: user.phone ?? '',
-        createdAt: user.createdAt.toISOString(),
-    };
-};
-const syncUserCache = (user) => {
-    const existingIndex = store_1.users.findIndex((item) => item.id === user.id);
-    if (existingIndex >= 0) {
-        store_1.users[existingIndex] = user;
-        return;
-    }
-    store_1.users.push(user);
-};
 const isUniqueConstraintError = (error) => {
     return (typeof error === 'object' &&
         error !== null &&
@@ -49,8 +33,7 @@ router.post('/register', async (req, res, next) => {
             }
             throw error;
         }
-        const user = mapDbUserToContractUser(createdUser);
-        syncUserCache(user);
+        const user = (0, auth_1.mapDbUserToContractUser)(createdUser);
         const response = {
             data: {
                 user,
@@ -77,8 +60,7 @@ router.post('/login', async (req, res, next) => {
         if (!dbUser) {
             throw (0, http_1.createHttpError)(404, 'User not found');
         }
-        const user = mapDbUserToContractUser(dbUser);
-        syncUserCache(user);
+        const user = (0, auth_1.mapDbUserToContractUser)(dbUser);
         const response = {
             data: {
                 user,
@@ -102,8 +84,7 @@ router.get('/me', async (req, res, next) => {
         if (!dbUser) {
             throw (0, http_1.createHttpError)(404, 'User not found');
         }
-        const user = mapDbUserToContractUser(dbUser);
-        syncUserCache(user);
+        const user = (0, auth_1.mapDbUserToContractUser)(dbUser);
         const response = {
             data: {
                 user,

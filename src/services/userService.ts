@@ -1,5 +1,5 @@
 import { GroupRole } from '../../../shared/contracts';
-import { groupMembers, groups, users } from '../data/store';
+import { groupMembers, groups } from '../data/store';
 import { prisma } from '../lib/prisma';
 import { createHttpError } from '../utils/http';
 
@@ -36,12 +36,6 @@ export const deleteCurrentUser = async (userId: string): Promise<string> => {
       id: userId,
     },
   });
-
-  const index = users.findIndex((item) => item.id === userId);
-
-  if (index >= 0) {
-    users.splice(index, 1);
-  }
 
   return userId;
 };

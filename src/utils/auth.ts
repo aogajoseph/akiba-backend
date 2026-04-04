@@ -1,5 +1,4 @@
 import { User } from '../../../shared/contracts';
-import { users } from '../data/store';
 import { prisma } from '../lib/prisma';
 import { createHttpError } from './http';
 
@@ -19,17 +18,6 @@ export const mapDbUserToContractUser = (user: DbUserLike): User => {
   };
 };
 
-const syncUserCache = (user: User): void => {
-  const existingIndex = users.findIndex((item) => item.id === user.id);
-
-  if (existingIndex >= 0) {
-    users[existingIndex] = user;
-    return;
-  }
-
-  users.push(user);
-};
-
 export const getCurrentUserOrThrow = async (userId: string): Promise<User> => {
   const dbUser = await prisma.user.findUnique({
     where: {
@@ -41,10 +29,7 @@ export const getCurrentUserOrThrow = async (userId: string): Promise<User> => {
     throw createHttpError(404, 'User not found');
   }
 
-  const user = mapDbUserToContractUser(dbUser);
-  syncUserCache(user);
-
-  return user;
+  return mapDbUserToContractUser(dbUser);
 };
 
 export const getUserByPhoneNumber = async (phoneNumber: string): Promise<User | null> => {
@@ -58,10 +43,7 @@ export const getUserByPhoneNumber = async (phoneNumber: string): Promise<User | 
     return null;
   }
 
-  const user = mapDbUserToContractUser(dbUser);
-  syncUserCache(user);
-
-  return user;
+  return mapDbUserToContractUser(dbUser);
 };
 
 export const getUsersByIds = async (userIds: string[]): Promise<Map<string, User>> => {
@@ -81,7 +63,6 @@ export const getUsersByIds = async (userIds: string[]): Promise<Map<string, User
 
   return dbUsers.reduce<Map<string, User>>((userMap, dbUser) => {
     const user = mapDbUserToContractUser(dbUser);
-    syncUserCache(user);
     userMap.set(user.id, user);
     return userMap;
   }, new Map<string, User>());

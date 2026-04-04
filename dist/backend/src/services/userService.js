@@ -31,10 +31,6 @@ const deleteCurrentUser = async (userId) => {
             id: userId,
         },
     });
-    const index = store_1.users.findIndex((item) => item.id === userId);
-    if (index >= 0) {
-        store_1.users.splice(index, 1);
-    }
     return userId;
 };
 exports.deleteCurrentUser = deleteCurrentUser;
