@@ -111,7 +111,10 @@ const getCompletedBalanceForSpace = async (spaceId) => {
 };
 exports.getCompletedBalanceForSpace = getCompletedBalanceForSpace;
 const storeWebhookPayload = async (payload) => {
-    const referenceValue = payload.receiptCode;
+    const referenceValue = payload.reference ??
+        payload.receiptCode ??
+        payload.TransID ??
+        payload.MpesaReceiptNumber;
     const reference = typeof referenceValue === 'string' && referenceValue.trim().length > 0
         ? referenceValue.trim()
         : null;
@@ -505,7 +508,8 @@ const getSignatoryReport = async (groupId, requesterUserId) => {
     };
 };
 exports.getSignatoryReport = getSignatoryReport;
-const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, receiptCode, externalName) => {
+const processMpesaWebhookPayment = async (input) => {
+    const { accountNumber, amount, externalName, phoneNumber, reference, source = contracts_1.TransactionSource.MPESA_PAYBILL, } = input;
     const space = await prisma_1.prisma.space.findUnique({
         where: {
             accountNumber,
@@ -517,32 +521,13 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
     const existingTransaction = await prisma_1.prisma.transaction.findUnique({
         where: {
-            reference: receiptCode,
+            reference,
         },
     });
     if (existingTransaction) {
-        if (existingTransaction.status === contracts_1.TransactionStatus.COMPLETED) {
-            return {
-                deposit: mapDbTransactionToContractTransaction(existingTransaction),
-                duplicate: true,
-                group: mapDbSpaceToGroup(space),
-            };
-        }
-        const completedTransaction = await prisma_1.prisma.transaction.update({
-            where: {
-                id: existingTransaction.id,
-            },
-            data: {
-                amount,
-                status: contracts_1.TransactionStatus.COMPLETED,
-                source: contracts_1.TransactionSource.MPESA_PAYBILL,
-                phoneNumber: normalizedPhoneNumber,
-                externalName,
-            },
-        });
         return {
-            deposit: mapDbTransactionToContractTransaction(completedTransaction),
-            duplicate: false,
+            deposit: mapDbTransactionToContractTransaction(existingTransaction),
+            duplicate: true,
             group: mapDbSpaceToGroup(space),
         };
     }
@@ -554,8 +539,8 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
                 type: contracts_1.TransactionType.DEPOSIT,
                 status: contracts_1.TransactionStatus.COMPLETED,
                 amount,
-                reference: receiptCode,
-                source: contracts_1.TransactionSource.MPESA_PAYBILL,
+                reference,
+                source,
                 phoneNumber: normalizedPhoneNumber,
                 externalName,
             },
@@ -570,7 +555,7 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
         if (isUniqueConstraintError(error)) {
             const duplicateTransaction = await prisma_1.prisma.transaction.findUnique({
                 where: {
-                    reference: receiptCode,
+                    reference,
                 },
             });
             if (!duplicateTransaction) {
@@ -578,7 +563,7 @@ const processMpesaWebhookPayment = async (amount, accountNumber, phoneNumber, re
             }
             return {
                 deposit: mapDbTransactionToContractTransaction(duplicateTransaction),
-                duplicate: duplicateTransaction.status === contracts_1.TransactionStatus.COMPLETED,
+                duplicate: true,
                 group: mapDbSpaceToGroup(space),
             };
         }

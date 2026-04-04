@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { TransactionSource } from '../../../shared/contracts';
 import {
   finalizeWebhookLog,
   processMpesaWebhookPayment,
@@ -45,6 +46,24 @@ const coerceNonEmptyString = (value: unknown): string | null => {
   }
 
   return value.trim();
+};
+
+const coerceTransactionSource = (value: unknown): TransactionSource | null => {
+  const normalized = coerceNonEmptyString(value)?.toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === TransactionSource.MPESA_PAYBILL) {
+    return TransactionSource.MPESA_PAYBILL;
+  }
+
+  if (normalized === TransactionSource.BANK_TRANSFER) {
+    return TransactionSource.BANK_TRANSFER;
+  }
+
+  return null;
 };
 
 const getCallbackMetadataMap = (payload: Record<string, unknown>): Record<string, unknown> => {
@@ -107,29 +126,35 @@ router.post('/mpesa/webhook', async (req, res, next) => {
       coerceNonEmptyString(payload.externalName) ??
       coerceNonEmptyString(getNestedValue(payload, ['FirstName'])) ??
       coerceNonEmptyString(getNestedValue(payload, ['firstName']));
-    const receiptCode =
+    const reference =
+      coerceNonEmptyString(payload.reference) ??
       coerceNonEmptyString(callbackMetadata.MpesaReceiptNumber) ??
       coerceNonEmptyString(payload.TransID) ??
       coerceNonEmptyString(payload.receiptCode) ??
       coerceNonEmptyString(getNestedValue(payload, ['TransID']));
+    const source =
+      coerceTransactionSource(payload.source) ??
+      coerceTransactionSource(payload.paymentSource) ??
+      TransactionSource.MPESA_PAYBILL;
 
-    if (!amount || !accountNumber || !phoneNumber || !receiptCode) {
+    if (!amount || !accountNumber || !phoneNumber || !reference) {
       throw createHttpError(400, 'Invalid M-Pesa webhook payload');
     }
 
-    const result = await processMpesaWebhookPayment(
+    const result = await processMpesaWebhookPayment({
       amount,
       accountNumber,
       phoneNumber,
-      receiptCode,
-      externalName ?? undefined,
-    );
+      reference,
+      externalName: externalName ?? undefined,
+      source,
+    });
 
     await finalizeWebhookLog(
       logId,
-      result.duplicate ? `duplicate:${receiptCode}` : `processed:${receiptCode}`,
+      result.duplicate ? `duplicate:${reference}` : `processed:${reference}`,
       {
-        reference: receiptCode,
+        reference,
         spaceId: result.group.id,
         status: result.duplicate ? 'duplicate' : 'processed',
       },
@@ -139,13 +164,15 @@ router.post('/mpesa/webhook', async (req, res, next) => {
       amount,
       duplicate: result.duplicate,
       groupId: result.group.id,
-      receiptCode,
+      reference,
+      source,
     });
 
     res.json({
       success: true,
       duplicate: result.duplicate,
       groupId: result.group.id,
+      spaceId: result.group.id,
     });
   } catch (error) {
     if (logId) {
