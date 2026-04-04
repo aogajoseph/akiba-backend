@@ -22,7 +22,8 @@ import {
   UpdateGroupResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups } from '../data/store';
+import { groupMembers } from '../data/store';
+import { prisma } from '../lib/prisma';
 import {
   createHttpError,
   ensureNonEmptyString,
@@ -67,26 +68,63 @@ const getCurrentUser = async (headerValue: string | undefined): Promise<User> =>
   return getCurrentUserOrThrow(userId);
 };
 
-const getGroupById = (groupId: string): Group => {
-  const group = groups.find((item) => item.id === groupId);
+const getDefaultPaybillNumber = (): string => {
+  return process.env.MPESA_PAYBILL?.trim() || '522522';
+};
 
-  if (!group) {
+const mapSpaceToGroup = (space: {
+  accountNumber: string | null;
+  createdAt: Date;
+  createdById: string;
+  deadline: Date | null;
+  description: string | null;
+  id: string;
+  imageUrl: string | null;
+  name: string;
+  paybillNumber: string | null;
+  targetAmount: number | null;
+}): Group => {
+  return {
+    id: space.id,
+    name: space.name,
+    description: space.description ?? undefined,
+    imageUrl: space.imageUrl ?? undefined,
+    paybillNumber: space.paybillNumber ?? getDefaultPaybillNumber(),
+    accountNumber: space.accountNumber ?? '',
+    targetAmount: space.targetAmount ?? undefined,
+    collectedAmount: 0,
+    deadline: space.deadline?.toISOString(),
+    createdByUserId: space.createdById,
+    approvalThreshold: 1,
+    createdAt: space.createdAt.toISOString(),
+  };
+};
+
+const getGroupById = async (groupId: string): Promise<Group> => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: groupId,
+    },
+  });
+
+  if (!space) {
     throw createHttpError(404, 'Group not found');
   }
 
-  return group;
+  return mapSpaceToGroup(space);
 };
 
-const requireMembership = (groupId: string, userId: string): GroupMember => {
-  const membership = groupMembers.find(
-    (item) => item.groupId === groupId && item.userId === userId,
-  );
+const requireMembership = async (groupId: string, userId: string): Promise<void> => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId: groupId,
+      userId,
+    },
+  });
 
   if (!membership) {
     throw createHttpError(403, 'You are not a member of this group');
   }
-
-  return membership;
 };
 
 const toAdmin = (item: { userId: string; name: string }): SpaceAdmin => {
@@ -205,9 +243,21 @@ router.post('/', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const memberships = groupMembers.filter((item) => item.userId === user.id);
-    const visibleGroups = groups.filter((group) =>
-      memberships.some((membership) => membership.groupId === group.id),
+    const memberships = await prisma.spaceMember.findMany({
+      where: {
+        userId: user.id,
+      },
+      include: {
+        space: true,
+      },
+    });
+    const visibleGroups = Array.from(
+      new Map(
+        memberships.map((membership) => [
+          membership.space.id,
+          mapSpaceToGroup(membership.space),
+        ]),
+      ).values(),
     );
 
     const response: ApiResponse<ListGroupsResponseDto> = {
@@ -227,8 +277,8 @@ router.get('/:spaceId/transactions/summary', async (req: Request<SpaceParams>, r
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
     const { spaceId } = req.params;
-    const group = getGroupById(spaceId);
-    requireMembership(group.id, user.id);
+    const group = await getGroupById(spaceId);
+    await requireMembership(group.id, user.id);
 
     const response: ApiResponse<GetTransactionsSummaryResponseDto> = {
       data: await getTransactionsSummary(spaceId),
@@ -244,8 +294,8 @@ router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) =>
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
     const { spaceId } = req.params;
-    const group = getGroupById(spaceId);
-    requireMembership(group.id, user.id);
+    const group = await getGroupById(spaceId);
+    await requireMembership(group.id, user.id);
     const body = getObjectBody(req.body);
     const amount = ensurePositiveNumber(body.amount, 'amount must be a positive number');
     const deposit = await createDeposit(spaceId, user.id, amount);
@@ -265,8 +315,8 @@ router.post('/:spaceId/withdraw', async (req: Request<SpaceParams>, res, next) =
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
     const { spaceId } = req.params;
-    const group = getGroupById(spaceId);
-    requireMembership(group.id, user.id);
+    const group = await getGroupById(spaceId);
+    await requireMembership(group.id, user.id);
     const body = getObjectBody(req.body);
     const amount = ensurePositiveNumber(body.amount, 'amount must be a positive number');
     const reason = ensureOptionalNonEmptyString(
@@ -305,8 +355,8 @@ router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
 router.get('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const group = getGroupById(req.params.groupId);
-    requireMembership(group.id, user.id);
+    const group = await getGroupById(req.params.groupId);
+    await requireMembership(group.id, user.id);
 
     const response: ApiResponse<GetGroupResponseDto> = {
       data: {
@@ -407,7 +457,7 @@ router.delete('/:groupId', async (req: Request<GroupParams>, res, next) => {
 router.post('/:groupId/join', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const group = getGroupById(req.params.groupId);
+    const group = await getGroupById(req.params.groupId);
 
     const existingMembership = groupMembers.find(
       (item) => item.groupId === group.id && item.userId === user.id,
@@ -451,8 +501,8 @@ router.delete('/:groupId/members/:memberId/leave', async (req: Request<GroupMemb
 router.get('/:groupId/members', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const group = getGroupById(req.params.groupId);
-    requireMembership(group.id, user.id);
+    const group = await getGroupById(req.params.groupId);
+    await requireMembership(group.id, user.id);
 
     const groupSpaceMembers = groupMembers.filter((item) => item.groupId === group.id);
     const usersById = await getUsersByIds(groupSpaceMembers.map((member) => member.userId));
