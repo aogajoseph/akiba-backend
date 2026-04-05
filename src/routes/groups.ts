@@ -231,10 +231,13 @@ router.post('/', async (req, res, next) => {
         body.image,
         'image must be a non-empty string',
       ),
-      approvalThreshold: ensurePositiveInteger(
-        body.approvalThreshold,
-        'approvalThreshold must be a positive integer',
-      ),
+      approvalThreshold:
+        body.approvalThreshold === undefined || body.approvalThreshold === null
+          ? 2
+          : ensurePositiveInteger(
+              body.approvalThreshold,
+              'approvalThreshold must be a positive integer',
+            ),
       targetAmount:
         body.targetAmount === undefined || body.targetAmount === null
           ? undefined
@@ -517,7 +520,7 @@ router.patch('/:groupId', async (req: Request<GroupParams>, res, next) => {
         : undefined;
     }
 
-    const group = updateGroup(req.params.groupId, user.id, dto);
+    const group = await updateGroup(req.params.groupId, user.id, dto);
 
     const response: ApiResponse<UpdateGroupResponseDto> = {
       data: {
@@ -623,7 +626,7 @@ router.get('/:groupId/admins', async (req: Request<GroupParams>, res, next) => {
 router.post('/:groupId/members/:memberId/promote', async (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const member = promoteMember(req.params.groupId, req.params.memberId, user.id);
+    const member = await promoteMember(req.params.groupId, req.params.memberId, user.id);
 
     const response: ApiResponse<PromoteGroupMemberResponseDto> = {
       data: {
@@ -640,7 +643,7 @@ router.post('/:groupId/members/:memberId/promote', async (req: Request<GroupMemb
 router.post('/:groupId/members/:memberId/revoke', async (req: Request<GroupMemberParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const member = revokeMember(req.params.groupId, req.params.memberId, user.id);
+    const member = await revokeMember(req.params.groupId, req.params.memberId, user.id);
 
     const response: ApiResponse<RevokeGroupMemberResponseDto> = {
       data: {

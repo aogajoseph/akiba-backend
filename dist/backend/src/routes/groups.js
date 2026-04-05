@@ -123,7 +123,9 @@ router.post('/', async (req, res, next) => {
             name: (0, http_1.ensureNonEmptyString)(body.name, 'name is required'),
             description: (0, http_1.ensureOptionalNonEmptyString)(body.description, 'description must be a non-empty string'),
             image: (0, http_1.ensureOptionalNonEmptyString)(body.image, 'image must be a non-empty string'),
-            approvalThreshold: (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer'),
+            approvalThreshold: body.approvalThreshold === undefined || body.approvalThreshold === null
+                ? 2
+                : (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer'),
             targetAmount: body.targetAmount === undefined || body.targetAmount === null
                 ? undefined
                 : (0, http_1.ensurePositiveNumber)(body.targetAmount, 'targetAmount must be a positive number'),
@@ -350,7 +352,7 @@ router.patch('/:groupId', async (req, res, next) => {
                 ? ensureOptionalFutureDateString(deadlineField.value)
                 : undefined;
         }
-        const group = (0, groupService_1.updateGroup)(req.params.groupId, user.id, dto);
+        const group = await (0, groupService_1.updateGroup)(req.params.groupId, user.id, dto);
         const response = {
             data: {
                 group,
@@ -447,7 +449,7 @@ router.get('/:groupId/admins', async (req, res, next) => {
 router.post('/:groupId/members/:memberId/promote', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        const member = (0, groupService_1.promoteMember)(req.params.groupId, req.params.memberId, user.id);
+        const member = await (0, groupService_1.promoteMember)(req.params.groupId, req.params.memberId, user.id);
         const response = {
             data: {
                 member,
@@ -462,7 +464,7 @@ router.post('/:groupId/members/:memberId/promote', async (req, res, next) => {
 router.post('/:groupId/members/:memberId/revoke', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        const member = (0, groupService_1.revokeMember)(req.params.groupId, req.params.memberId, user.id);
+        const member = await (0, groupService_1.revokeMember)(req.params.groupId, req.params.memberId, user.id);
         const response = {
             data: {
                 member,

@@ -59,7 +59,7 @@ model Space {
 
   paybillNumber     String?
   accountNumber     String? @unique
-  approvalThreshold Int     @default(1)
+  approvalThreshold Int     @default(2)
 
   createdAt         DateTime @default(now())
   createdById       String

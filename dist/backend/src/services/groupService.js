@@ -17,13 +17,18 @@ const WITHDRAWAL_FEE_RATE = 0.02;
 const getMpesaPaybillNumber = () => {
     return process.env.MPESA_PAYBILL?.trim() || '522522';
 };
+const ensureApprovalThresholdInRange = (approvalThreshold) => {
+    if (approvalThreshold < 2 || approvalThreshold > 3) {
+        throw (0, http_1.createHttpError)(400, 'approvalThreshold must be between 2 and 3');
+    }
+};
 const isUniqueConstraintError = (error) => {
     return (typeof error === 'object' &&
         error !== null &&
         'code' in error &&
         error.code === 'P2002');
 };
-const mapDbSpaceToGroup = (space) => {
+const mapDbSpaceToGroup = (space, collectedAmount = 0) => {
     return {
         id: space.id,
         name: space.name,
@@ -32,7 +37,7 @@ const mapDbSpaceToGroup = (space) => {
         paybillNumber: space.paybillNumber ?? getMpesaPaybillNumber(),
         accountNumber: space.accountNumber ?? '',
         targetAmount: space.targetAmount ?? undefined,
-        collectedAmount: 0,
+        collectedAmount,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
         approvalThreshold: space.approvalThreshold,
@@ -95,7 +100,12 @@ const calculateWithdrawalFee = (amount) => {
     return roundCurrency(amount * WITHDRAWAL_FEE_RATE);
 };
 const getSpaceApprovalThreshold = (space) => {
-    return Math.max(space.approvalThreshold ?? 1, 1);
+    return Math.max(space.approvalThreshold ?? 2, 2);
+};
+const requireSpaceCreator = (space, userId) => {
+    if (space.createdById !== userId) {
+        throw (0, http_1.createHttpError)(403, 'Only the account creator can manage signatories');
+    }
 };
 const getSpaceOrThrow = async (spaceId) => {
     const space = await prisma_1.prisma.space.findUnique({
@@ -152,7 +162,11 @@ const getAvailableBalanceForSpace = async (spaceId) => {
                 spaceId,
                 type: contracts_1.TransactionType.WITHDRAWAL,
                 status: {
-                    in: [contracts_1.TransactionStatus.APPROVED, contracts_1.TransactionStatus.COMPLETED],
+                    in: [
+                        contracts_1.TransactionStatus.PENDING_APPROVAL,
+                        contracts_1.TransactionStatus.APPROVED,
+                        contracts_1.TransactionStatus.COMPLETED,
+                    ],
                 },
             },
             _sum: {
@@ -388,6 +402,8 @@ const createGroup = (userId, dto) => {
 };
 exports.createGroup = createGroup;
 const createSpace = async (input) => {
+    const approvalThreshold = input.approvalThreshold ?? 2;
+    ensureApprovalThresholdInRange(approvalThreshold);
     const accountNumber = `AKB_${Date.now()}`;
     try {
         const space = await prisma_1.prisma.$transaction(async (tx) => {
@@ -400,7 +416,7 @@ const createSpace = async (input) => {
                     deadline: input.deadline ? new Date(input.deadline) : undefined,
                     paybillNumber: getMpesaPaybillNumber(),
                     accountNumber,
-                    approvalThreshold: input.approvalThreshold ?? 1,
+                    approvalThreshold,
                     createdById: input.createdById,
                 },
             });
@@ -540,34 +556,43 @@ const getSpaceMembers = async (spaceId) => {
     return members.map(mapDbSpaceMemberToSpaceMember);
 };
 exports.getSpaceMembers = getSpaceMembers;
-const updateGroup = (groupId, actorUserId, dto) => {
-    const group = getGroupOrThrow(groupId);
-    requireRequesterMembership(groupId, actorUserId);
-    requireCreatorAccess(group, actorUserId);
-    if (dto.name !== undefined) {
-        group.name = dto.name;
-    }
-    if (Object.prototype.hasOwnProperty.call(dto, 'description')) {
-        group.description = dto.description;
-    }
-    if (dto.imageUrl !== undefined) {
-        group.imageUrl = dto.imageUrl;
-    }
+const updateGroup = async (groupId, actorUserId, dto) => {
+    const space = await getSpaceOrThrow(groupId);
+    await getSpaceMembershipOrThrow(groupId, actorUserId);
+    requireSpaceCreator(space, actorUserId);
     if (dto.approvalThreshold !== undefined) {
-        if (dto.approvalThreshold > MAX_SIGNATORIES) {
-            throw (0, http_1.createHttpError)(400, 'approvalThreshold cannot exceed the maximum signatories (3)');
+        ensureApprovalThresholdInRange(dto.approvalThreshold);
+        const adminCount = await prisma_1.prisma.spaceMember.count({
+            where: {
+                spaceId: groupId,
+                role: 'admin',
+            },
+        });
+        if (dto.approvalThreshold > adminCount) {
+            throw (0, http_1.createHttpError)(409, 'approvalThreshold cannot exceed the number of admins');
         }
-        group.approvalThreshold = dto.approvalThreshold;
-        clampApprovalThreshold(group);
     }
-    if (dto.targetAmount !== undefined) {
-        group.targetAmount = dto.targetAmount;
-        group.collectedAmount = dto.targetAmount > 0 ? group.collectedAmount ?? 0 : undefined;
-    }
-    if (Object.prototype.hasOwnProperty.call(dto, 'deadline')) {
-        group.deadline = dto.deadline;
-    }
-    return group;
+    const updatedSpace = await prisma_1.prisma.space.update({
+        where: {
+            id: groupId,
+        },
+        data: {
+            name: dto.name,
+            description: Object.prototype.hasOwnProperty.call(dto, 'description')
+                ? dto.description ?? null
+                : undefined,
+            imageUrl: dto.imageUrl,
+            approvalThreshold: dto.approvalThreshold,
+            targetAmount: dto.targetAmount,
+            deadline: Object.prototype.hasOwnProperty.call(dto, 'deadline')
+                ? dto.deadline
+                    ? new Date(dto.deadline)
+                    : null
+                : undefined,
+        },
+    });
+    const balance = await (0, exports.getCompletedBalanceForSpace)(groupId);
+    return mapDbSpaceToGroup(updatedSpace, balance);
 };
 exports.updateGroup = updateGroup;
 const joinGroup = (groupId, userId) => {
@@ -713,8 +738,20 @@ const createWithdrawal = async (spaceId, userId, amount, reason) => {
     if (amount <= 0) {
         throw (0, http_1.createHttpError)(400, 'amount must be a positive number');
     }
-    await getSpaceOrThrow(spaceId);
+    const space = await getSpaceOrThrow(spaceId);
     await getSpaceMembershipOrThrow(spaceId, userId);
+    if (userId !== space.createdById) {
+        throw (0, http_1.createHttpError)(403, 'Only the space creator can initiate withdrawals');
+    }
+    const adminCount = await prisma_1.prisma.spaceMember.count({
+        where: {
+            spaceId,
+            role: 'admin',
+        },
+    });
+    if (adminCount < 2) {
+        throw (0, http_1.createHttpError)(409, 'At least 2 admins required before withdrawals');
+    }
     const availableBalance = await (0, exports.getAvailableBalanceForSpace)(spaceId);
     const feeAmount = calculateWithdrawalFee(amount);
     if (amount + feeAmount > availableBalance) {
@@ -755,6 +792,9 @@ const approveWithdrawal = async (withdrawalId, userId) => {
         throw (0, http_1.createHttpError)(409, 'Withdrawal is no longer pending approval');
     }
     await requireSpaceAdmin(withdrawal.spaceId, userId);
+    if (withdrawal.userId === userId) {
+        throw (0, http_1.createHttpError)(403, 'Creator cannot approve their own withdrawal');
+    }
     try {
         const updatedWithdrawal = await prisma_1.prisma.$transaction(async (tx) => {
             await tx.withdrawalApproval.create({
@@ -849,9 +889,6 @@ const executeWithdrawal = async (transactionId, executorUserId) => {
         if (withdrawal.type !== contracts_1.TransactionType.WITHDRAWAL) {
             throw (0, http_1.createHttpError)(400, 'Only withdrawals can be executed');
         }
-        if (withdrawal.status !== contracts_1.TransactionStatus.APPROVED) {
-            throw (0, http_1.createHttpError)(409, 'Withdrawal must be approved before execution');
-        }
         if (executorUserId) {
             const executorMembership = await tx.spaceMember.findFirst({
                 where: {
@@ -862,6 +899,20 @@ const executeWithdrawal = async (transactionId, executorUserId) => {
             if (!executorMembership || executorMembership.role !== 'admin') {
                 throw (0, http_1.createHttpError)(403, 'Only admins can execute withdrawals');
             }
+        }
+        const existingFee = await tx.transaction.findUnique({
+            where: {
+                reference: `${withdrawal.reference}_fee`,
+            },
+        });
+        if (withdrawal.status === contracts_1.TransactionStatus.COMPLETED) {
+            return {
+                fee: existingFee,
+                withdrawal,
+            };
+        }
+        if (withdrawal.status !== contracts_1.TransactionStatus.APPROVED) {
+            throw (0, http_1.createHttpError)(409, 'Withdrawal must be approved before execution');
         }
         const feeAmount = calculateWithdrawalFee(Number(withdrawal.amount));
         const [completedDeposits, reservedWithdrawals, completedFees] = await Promise.all([
@@ -901,23 +952,35 @@ const executeWithdrawal = async (transactionId, executorUserId) => {
         const availableAfterReservation = roundCurrency(Number(completedDeposits._sum.amount ?? 0) -
             Number(reservedWithdrawals._sum.amount ?? 0) -
             Number(completedFees._sum.amount ?? 0));
-        if (feeAmount > availableAfterReservation) {
+        if (!existingFee && feeAmount > availableAfterReservation) {
             throw (0, http_1.createHttpError)(409, 'Insufficient funds to cover withdrawal fees');
         }
-        let feeTransaction = null;
-        if (feeAmount > 0) {
-            feeTransaction = await tx.transaction.create({
-                data: {
-                    spaceId: withdrawal.spaceId,
-                    userId: withdrawal.userId,
-                    type: contracts_1.TransactionType.FEE,
-                    status: contracts_1.TransactionStatus.COMPLETED,
-                    amount: feeAmount,
-                    reference: `${withdrawal.reference}_fee`,
-                    source: contracts_1.TransactionSource.SYSTEM_FEE,
-                    description: 'Withdrawal processing fee',
-                },
-            });
+        let feeTransaction = existingFee;
+        if (feeAmount > 0 && !feeTransaction) {
+            try {
+                feeTransaction = await tx.transaction.create({
+                    data: {
+                        spaceId: withdrawal.spaceId,
+                        userId: withdrawal.userId,
+                        type: contracts_1.TransactionType.FEE,
+                        status: contracts_1.TransactionStatus.COMPLETED,
+                        amount: feeAmount,
+                        reference: `${withdrawal.reference}_fee`,
+                        source: contracts_1.TransactionSource.SYSTEM_FEE,
+                        description: 'Withdrawal processing fee',
+                    },
+                });
+            }
+            catch (error) {
+                if (!isUniqueConstraintError(error)) {
+                    throw error;
+                }
+                feeTransaction = await tx.transaction.findUnique({
+                    where: {
+                        reference: `${withdrawal.reference}_fee`,
+                    },
+                });
+            }
         }
         const completedWithdrawal = await tx.transaction.update({
             where: {
@@ -1061,41 +1124,89 @@ const getTransactionsSummary = async (spaceId) => {
     };
 };
 exports.getTransactionsSummary = getTransactionsSummary;
-const promoteMember = (groupId, memberId, actorUserId) => {
-    const group = getGroupOrThrow(groupId);
-    requireRequesterMembership(groupId, actorUserId);
-    requireCreatorAccess(group, actorUserId);
-    const member = getMemberOrThrow(groupId, memberId);
-    if (member.signatoryRole !== null || member.role === contracts_1.GroupRole.SIGNATORY) {
+const promoteMember = async (groupId, memberId, actorUserId) => {
+    const space = await getSpaceOrThrow(groupId);
+    await getSpaceMembershipOrThrow(groupId, actorUserId);
+    requireSpaceCreator(space, actorUserId);
+    const member = await prisma_1.prisma.spaceMember.findFirst({
+        where: {
+            id: memberId,
+            spaceId: groupId,
+        },
+    });
+    if (!member) {
+        throw (0, http_1.createHttpError)(404, 'Group member not found');
+    }
+    if (member.role === 'admin') {
         throw (0, http_1.createHttpError)(409, 'Member is already a signatory');
     }
-    if (countSignatories(groupId) >= MAX_SIGNATORIES) {
+    const adminCount = await prisma_1.prisma.spaceMember.count({
+        where: {
+            spaceId: groupId,
+            role: 'admin',
+        },
+    });
+    if (adminCount >= 3) {
         throw (0, http_1.createHttpError)(409, 'This group already has the maximum number of signatories');
     }
-    const nextRole = getNextAvailableRole(groupId, PROMOTABLE_SIGNATORY_ROLES);
-    if (nextRole === null) {
-        throw (0, http_1.createHttpError)(409, 'No signatory slot is available for promotion');
-    }
-    member.role = contracts_1.GroupRole.SIGNATORY;
-    member.signatoryRole = nextRole;
-    return member;
+    const updatedMember = await prisma_1.prisma.spaceMember.update({
+        where: {
+            id: member.id,
+        },
+        data: {
+            role: 'admin',
+        },
+    });
+    return mapDbSpaceMemberToGroupMember(updatedMember);
 };
 exports.promoteMember = promoteMember;
-const revokeMember = (groupId, memberId, actorUserId) => {
-    const group = getGroupOrThrow(groupId);
-    requireRequesterMembership(groupId, actorUserId);
-    requireCreatorAccess(group, actorUserId);
-    const member = getMemberOrThrow(groupId, memberId);
-    if (member.userId === group.createdByUserId || member.signatoryRole === 'primary') {
+const revokeMember = async (groupId, memberId, actorUserId) => {
+    const space = await getSpaceOrThrow(groupId);
+    await getSpaceMembershipOrThrow(groupId, actorUserId);
+    requireSpaceCreator(space, actorUserId);
+    const member = await prisma_1.prisma.spaceMember.findFirst({
+        where: {
+            id: memberId,
+            spaceId: groupId,
+        },
+    });
+    if (!member) {
+        throw (0, http_1.createHttpError)(404, 'Group member not found');
+    }
+    if (member.userId === space.createdById) {
         throw (0, http_1.createHttpError)(409, 'The account creator cannot be revoked as a signatory');
     }
-    if (member.signatoryRole === null || member.role !== contracts_1.GroupRole.SIGNATORY) {
+    if (member.role !== 'admin') {
         throw (0, http_1.createHttpError)(409, 'Only signatories can be revoked');
     }
-    member.role = contracts_1.GroupRole.MEMBER;
-    member.signatoryRole = null;
-    clampApprovalThreshold(group);
-    return member;
+    const adminCount = await prisma_1.prisma.spaceMember.count({
+        where: {
+            spaceId: groupId,
+            role: 'admin',
+        },
+    });
+    if (adminCount <= 2) {
+        throw (0, http_1.createHttpError)(409, 'At least 2 admins must remain in the group');
+    }
+    const updatedMember = await prisma_1.prisma.spaceMember.update({
+        where: {
+            id: member.id,
+        },
+        data: {
+            role: 'member',
+        },
+    });
+    if (space.approvalThreshold > adminCount - 1) {
+        await prisma_1.prisma.space.update({
+            where: {
+                id: groupId,
+            },
+            data: {
+                approvalThreshold: adminCount - 1,
+            },
+        });
+    }
+    return mapDbSpaceMemberToGroupMember(updatedMember);
 };
 exports.revokeMember = revokeMember;
 const leaveGroup = (groupId, memberId, requesterUserId) => {
