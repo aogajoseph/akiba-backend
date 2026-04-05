@@ -13,6 +13,7 @@ import {
   TransactionType,
   UpdateGroupRequestDto,
 } from '../../../shared/contracts';
+import { normalizePhoneNumber } from '../../../shared/phone';
 import type { Prisma } from '@prisma/client';
 import { approvals, groupMembers, groups, messages, transactions } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
@@ -411,18 +412,12 @@ export const finalizeWebhookLog = async (
   });
 };
 
-const normalizePhoneNumber = (value: string): string => {
-  const digitsOnly = value.replace(/[^\d]/g, '');
-
-  if (digitsOnly.startsWith('254')) {
-    return digitsOnly;
+const normalizeStoredPhoneNumber = (value: string, fieldName: string): string => {
+  try {
+    return normalizePhoneNumber(value);
+  } catch {
+    throw createHttpError(400, `${fieldName} must be a valid Kenyan phone number`);
   }
-
-  if (digitsOnly.startsWith('0')) {
-    return `254${digitsOnly.slice(1)}`;
-  }
-
-  return digitsOnly;
 };
 
 const generateAccountNumber = (): string => {
@@ -910,7 +905,7 @@ export const processMpesaWebhookPayment = async (
     throw createHttpError(404, 'Space not found for this account number');
   }
 
-  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const normalizedPhoneNumber = normalizeStoredPhoneNumber(phoneNumber, 'phoneNumber');
   const existingTransaction = await prisma.transaction.findUnique({
     where: {
       reference,
@@ -1006,7 +1001,9 @@ export const createDeposit = async (
         amount,
         reference,
         source: options?.source ?? TransactionSource.MPESA_STK,
-        phoneNumber: options?.phoneNumber,
+        phoneNumber: options?.phoneNumber
+          ? normalizeStoredPhoneNumber(options.phoneNumber, 'phoneNumber')
+          : undefined,
         externalName: options?.externalName,
       },
     });
@@ -1042,6 +1039,11 @@ export const createWithdrawal = async (
   if (!details.recipientPhoneNumber.trim()) {
     throw createHttpError(400, 'recipientPhoneNumber must be a non-empty string');
   }
+
+  const normalizedRecipientPhoneNumber = normalizeStoredPhoneNumber(
+    details.recipientPhoneNumber,
+    'recipientPhoneNumber',
+  );
 
   if (!details.recipientName.trim()) {
     throw createHttpError(400, 'recipientName must be a non-empty string');
@@ -1098,7 +1100,7 @@ export const createWithdrawal = async (
       reference: createId('withdrawal_ref'),
       source: TransactionSource.BANK_TRANSFER,
       description: details.reason.trim(),
-      recipientPhoneNumber: details.recipientPhoneNumber.trim(),
+      recipientPhoneNumber: normalizedRecipientPhoneNumber,
       recipientName: details.recipientName.trim(),
     },
   });

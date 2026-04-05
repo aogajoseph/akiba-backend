@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.listWithdrawalApprovals = exports.executeWithdrawal = exports.rejectWithdrawal = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = exports.getCompletedBalanceForSpace = exports.getSpaceFinancialSnapshotBySpaceIds = exports.getCompletedBalancesBySpaceIds = exports.getAvailableBalanceForSpace = void 0;
 const contracts_1 = require("../../../shared/contracts");
+const phone_1 = require("../../../shared/phone");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
 const prisma_1 = require("../lib/prisma");
@@ -269,15 +270,13 @@ const finalizeWebhookLog = async (logId, result, metadata) => {
     });
 };
 exports.finalizeWebhookLog = finalizeWebhookLog;
-const normalizePhoneNumber = (value) => {
-    const digitsOnly = value.replace(/[^\d]/g, '');
-    if (digitsOnly.startsWith('254')) {
-        return digitsOnly;
+const normalizeStoredPhoneNumber = (value, fieldName) => {
+    try {
+        return (0, phone_1.normalizePhoneNumber)(value);
     }
-    if (digitsOnly.startsWith('0')) {
-        return `254${digitsOnly.slice(1)}`;
+    catch {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be a valid Kenyan phone number`);
     }
-    return digitsOnly;
 };
 const generateAccountNumber = () => {
     let accountNumber = '';
@@ -654,7 +653,7 @@ const processMpesaWebhookPayment = async (input) => {
     if (!space) {
         throw (0, http_1.createHttpError)(404, 'Space not found for this account number');
     }
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const normalizedPhoneNumber = normalizeStoredPhoneNumber(phoneNumber, 'phoneNumber');
     const existingTransaction = await prisma_1.prisma.transaction.findUnique({
         where: {
             reference,
@@ -731,7 +730,9 @@ const createDeposit = async (spaceId, userId, amount, options) => {
                 amount,
                 reference,
                 source: options?.source ?? contracts_1.TransactionSource.MPESA_STK,
-                phoneNumber: options?.phoneNumber,
+                phoneNumber: options?.phoneNumber
+                    ? normalizeStoredPhoneNumber(options.phoneNumber, 'phoneNumber')
+                    : undefined,
                 externalName: options?.externalName,
             },
         });
@@ -755,6 +756,7 @@ const createWithdrawal = async (spaceId, userId, amount, details) => {
     if (!details.recipientPhoneNumber.trim()) {
         throw (0, http_1.createHttpError)(400, 'recipientPhoneNumber must be a non-empty string');
     }
+    const normalizedRecipientPhoneNumber = normalizeStoredPhoneNumber(details.recipientPhoneNumber, 'recipientPhoneNumber');
     if (!details.recipientName.trim()) {
         throw (0, http_1.createHttpError)(400, 'recipientName must be a non-empty string');
     }
@@ -799,7 +801,7 @@ const createWithdrawal = async (spaceId, userId, amount, details) => {
             reference: (0, http_1.createId)('withdrawal_ref'),
             source: contracts_1.TransactionSource.BANK_TRANSFER,
             description: details.reason.trim(),
-            recipientPhoneNumber: details.recipientPhoneNumber.trim(),
+            recipientPhoneNumber: normalizedRecipientPhoneNumber,
             recipientName: details.recipientName.trim(),
         },
     });
