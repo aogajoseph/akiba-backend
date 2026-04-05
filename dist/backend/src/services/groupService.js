@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.listWithdrawalApprovals = exports.executeWithdrawal = exports.rejectWithdrawal = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = exports.getCompletedBalanceForSpace = exports.getCompletedBalancesBySpaceIds = exports.getAvailableBalanceForSpace = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.listWithdrawalApprovals = exports.executeWithdrawal = exports.rejectWithdrawal = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = exports.getCompletedBalanceForSpace = exports.getSpaceFinancialSnapshotBySpaceIds = exports.getCompletedBalancesBySpaceIds = exports.getAvailableBalanceForSpace = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
@@ -146,10 +146,30 @@ const requireSpaceAdmin = async (spaceId, userId) => {
     return membership;
 };
 const getAvailableBalanceForSpace = async (spaceId) => {
-    const [completedDeposits, reservedWithdrawals, completedFees] = await Promise.all([
-        prisma_1.prisma.transaction.aggregate({
+    const snapshots = await (0, exports.getSpaceFinancialSnapshotBySpaceIds)([spaceId]);
+    return snapshots.get(spaceId)?.availableBalance ?? 0;
+};
+exports.getAvailableBalanceForSpace = getAvailableBalanceForSpace;
+const getCompletedBalancesBySpaceIds = async (spaceIds) => {
+    const snapshots = await (0, exports.getSpaceFinancialSnapshotBySpaceIds)(spaceIds);
+    return new Map(Array.from(snapshots.entries()).map(([spaceId, snapshot]) => [
+        spaceId,
+        snapshot.availableBalance,
+    ]));
+};
+exports.getCompletedBalancesBySpaceIds = getCompletedBalancesBySpaceIds;
+const getSpaceFinancialSnapshotBySpaceIds = async (spaceIds) => {
+    const uniqueSpaceIds = Array.from(new Set(spaceIds.filter(Boolean)));
+    if (uniqueSpaceIds.length === 0) {
+        return new Map();
+    }
+    const [completedDeposits, pendingWithdrawals, completedWithdrawals] = await Promise.all([
+        prisma_1.prisma.transaction.groupBy({
+            by: ['spaceId'],
             where: {
-                spaceId,
+                spaceId: {
+                    in: uniqueSpaceIds,
+                },
                 type: contracts_1.TransactionType.DEPOSIT,
                 status: contracts_1.TransactionStatus.COMPLETED,
             },
@@ -157,26 +177,28 @@ const getAvailableBalanceForSpace = async (spaceId) => {
                 amount: true,
             },
         }),
-        prisma_1.prisma.transaction.aggregate({
+        prisma_1.prisma.transaction.groupBy({
+            by: ['spaceId'],
             where: {
-                spaceId,
+                spaceId: {
+                    in: uniqueSpaceIds,
+                },
                 type: contracts_1.TransactionType.WITHDRAWAL,
                 status: {
-                    in: [
-                        contracts_1.TransactionStatus.PENDING_APPROVAL,
-                        contracts_1.TransactionStatus.APPROVED,
-                        contracts_1.TransactionStatus.COMPLETED,
-                    ],
+                    in: [contracts_1.TransactionStatus.PENDING_APPROVAL, contracts_1.TransactionStatus.APPROVED],
                 },
             },
             _sum: {
                 amount: true,
             },
         }),
-        prisma_1.prisma.transaction.aggregate({
+        prisma_1.prisma.transaction.groupBy({
+            by: ['spaceId'],
             where: {
-                spaceId,
-                type: contracts_1.TransactionType.FEE,
+                spaceId: {
+                    in: uniqueSpaceIds,
+                },
+                type: contracts_1.TransactionType.WITHDRAWAL,
                 status: contracts_1.TransactionStatus.COMPLETED,
             },
             _sum: {
@@ -184,40 +206,27 @@ const getAvailableBalanceForSpace = async (spaceId) => {
             },
         }),
     ]);
-    const deposits = Number(completedDeposits._sum.amount ?? 0);
-    const withdrawals = Number(reservedWithdrawals._sum.amount ?? 0);
-    const fees = Number(completedFees._sum.amount ?? 0);
-    return roundCurrency(deposits - withdrawals - fees);
-};
-exports.getAvailableBalanceForSpace = getAvailableBalanceForSpace;
-const getCompletedBalancesBySpaceIds = async (spaceIds) => {
-    const uniqueSpaceIds = Array.from(new Set(spaceIds.filter(Boolean)));
-    if (uniqueSpaceIds.length === 0) {
-        return new Map();
-    }
-    const groupedTransactions = await prisma_1.prisma.transaction.groupBy({
-        by: ['spaceId', 'type'],
-        where: {
-            spaceId: {
-                in: uniqueSpaceIds,
-            },
-            status: contracts_1.TransactionStatus.COMPLETED,
-        },
-        _sum: {
-            amount: true,
-        },
-    });
-    return groupedTransactions.reduce((balanceMap, item) => {
-        const currentBalance = balanceMap.get(item.spaceId) ?? 0;
-        const amount = Number(item._sum.amount ?? 0);
-        const nextBalance = item.type === contracts_1.TransactionType.WITHDRAWAL || item.type === contracts_1.TransactionType.FEE
-            ? currentBalance - amount
-            : currentBalance + amount;
-        balanceMap.set(item.spaceId, nextBalance);
-        return balanceMap;
+    const depositsBySpaceId = new Map(completedDeposits.map((item) => [item.spaceId, Number(item._sum.amount ?? 0)]));
+    const pendingWithdrawalsBySpaceId = new Map(pendingWithdrawals.map((item) => [item.spaceId, Number(item._sum.amount ?? 0)]));
+    const completedWithdrawalsBySpaceId = new Map(completedWithdrawals.map((item) => [item.spaceId, Number(item._sum.amount ?? 0)]));
+    return uniqueSpaceIds.reduce((snapshotMap, spaceId) => {
+        const totalBalance = depositsBySpaceId.get(spaceId) ?? 0;
+        const totalFees = roundCurrency(totalBalance * 0.025);
+        const pendingWithdrawalAmount = pendingWithdrawalsBySpaceId.get(spaceId) ?? 0;
+        const completedWithdrawalAmount = completedWithdrawalsBySpaceId.get(spaceId) ?? 0;
+        const reservedAmount = roundCurrency(pendingWithdrawalAmount + completedWithdrawalAmount);
+        const availableBalance = roundCurrency(totalBalance - totalFees - pendingWithdrawalAmount - completedWithdrawalAmount);
+        snapshotMap.set(spaceId, {
+            totalBalance,
+            totalFees,
+            pendingWithdrawalAmount,
+            reservedAmount,
+            availableBalance,
+        });
+        return snapshotMap;
     }, new Map());
 };
-exports.getCompletedBalancesBySpaceIds = getCompletedBalancesBySpaceIds;
+exports.getSpaceFinancialSnapshotBySpaceIds = getSpaceFinancialSnapshotBySpaceIds;
 const getCompletedBalanceForSpace = async (spaceId) => {
     const balancesBySpaceId = await (0, exports.getCompletedBalancesBySpaceIds)([spaceId]);
     return balancesBySpaceId.get(spaceId) ?? 0;
@@ -751,6 +760,18 @@ const createWithdrawal = async (spaceId, userId, amount, reason) => {
     });
     if (adminCount < 2) {
         throw (0, http_1.createHttpError)(409, 'At least 2 admins required before withdrawals');
+    }
+    const activeWithdrawal = await prisma_1.prisma.transaction.findFirst({
+        where: {
+            spaceId,
+            type: contracts_1.TransactionType.WITHDRAWAL,
+            status: {
+                in: [contracts_1.TransactionStatus.PENDING_APPROVAL, contracts_1.TransactionStatus.APPROVED],
+            },
+        },
+    });
+    if (activeWithdrawal) {
+        throw (0, http_1.createHttpError)(409, 'Please wait for the current withdrawal to complete before starting a new one.');
     }
     const availableBalance = await (0, exports.getAvailableBalanceForSpace)(spaceId);
     const feeAmount = calculateWithdrawalFee(amount);

@@ -14,7 +14,7 @@ const getCurrentUser = async (headerValue) => {
 const getDefaultPaybillNumber = () => {
     return process.env.MPESA_PAYBILL?.trim() || '522522';
 };
-const mapSpaceToGroup = (space, collectedAmount = 0) => {
+const mapSpaceToGroup = (space, financials) => {
     return {
         id: space.id,
         name: space.name,
@@ -23,10 +23,15 @@ const mapSpaceToGroup = (space, collectedAmount = 0) => {
         paybillNumber: space.paybillNumber ?? getDefaultPaybillNumber(),
         accountNumber: space.accountNumber ?? '',
         targetAmount: space.targetAmount ?? undefined,
-        collectedAmount,
+        collectedAmount: financials?.availableBalance ?? 0,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
         approvalThreshold: space.approvalThreshold,
+        totalBalance: financials?.totalBalance,
+        totalFees: financials?.totalFees,
+        pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
+        reservedAmount: financials?.reservedAmount,
+        availableBalance: financials?.availableBalance,
         createdAt: space.createdAt.toISOString(),
     };
 };
@@ -40,8 +45,8 @@ const getGroupById = async (groupId) => {
     if (!space) {
         throw (0, http_1.createHttpError)(404, 'Group not found');
     }
-    const balancesBySpaceId = await (0, groupService_1.getCompletedBalancesBySpaceIds)([normalizedGroupId]);
-    return mapSpaceToGroup(space, balancesBySpaceId.get(normalizedGroupId) ?? 0);
+    const financialsBySpaceId = await (0, groupService_1.getSpaceFinancialSnapshotBySpaceIds)([normalizedGroupId]);
+    return mapSpaceToGroup(space, financialsBySpaceId.get(normalizedGroupId));
 };
 const requireMembership = async (groupId, userId) => {
     const normalizedGroupId = (0, http_1.ensureNonEmptyString)(groupId, 'groupId is required');
@@ -163,10 +168,10 @@ router.get('/', async (req, res, next) => {
                 space: true,
             },
         });
-        const balancesBySpaceId = await (0, groupService_1.getCompletedBalancesBySpaceIds)(memberships.map((membership) => membership.space.id));
+        const financialsBySpaceId = await (0, groupService_1.getSpaceFinancialSnapshotBySpaceIds)(memberships.map((membership) => membership.space.id));
         const visibleGroups = Array.from(new Map(memberships.map((membership) => [
             membership.space.id,
-            mapSpaceToGroup(membership.space, balancesBySpaceId.get(membership.space.id) ?? 0),
+            mapSpaceToGroup(membership.space, financialsBySpaceId.get(membership.space.id)),
         ])).values());
         const response = {
             data: {

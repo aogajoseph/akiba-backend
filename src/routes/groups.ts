@@ -38,7 +38,7 @@ import {
   createSpace,
   createWithdrawal,
   deleteGroup,
-  getCompletedBalancesBySpaceIds,
+  getSpaceFinancialSnapshotBySpaceIds,
   getTransactionsSummary,
   getSpaceMembers,
   joinSpace,
@@ -85,7 +85,13 @@ const mapSpaceToGroup = (space: {
   name: string;
   paybillNumber: string | null;
   targetAmount: number | null;
-}, collectedAmount = 0): Group => {
+}, financials?: {
+  availableBalance?: number;
+  pendingWithdrawalAmount?: number;
+  reservedAmount?: number;
+  totalBalance?: number;
+  totalFees?: number;
+}): Group => {
   return {
     id: space.id,
     name: space.name,
@@ -94,10 +100,15 @@ const mapSpaceToGroup = (space: {
     paybillNumber: space.paybillNumber ?? getDefaultPaybillNumber(),
     accountNumber: space.accountNumber ?? '',
     targetAmount: space.targetAmount ?? undefined,
-    collectedAmount,
+    collectedAmount: financials?.availableBalance ?? 0,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
     approvalThreshold: space.approvalThreshold,
+    totalBalance: financials?.totalBalance,
+    totalFees: financials?.totalFees,
+    pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
+    reservedAmount: financials?.reservedAmount,
+    availableBalance: financials?.availableBalance,
     createdAt: space.createdAt.toISOString(),
   };
 };
@@ -114,8 +125,8 @@ const getGroupById = async (groupId: string): Promise<Group> => {
     throw createHttpError(404, 'Group not found');
   }
 
-  const balancesBySpaceId = await getCompletedBalancesBySpaceIds([normalizedGroupId]);
-  return mapSpaceToGroup(space, balancesBySpaceId.get(normalizedGroupId) ?? 0);
+  const financialsBySpaceId = await getSpaceFinancialSnapshotBySpaceIds([normalizedGroupId]);
+  return mapSpaceToGroup(space, financialsBySpaceId.get(normalizedGroupId));
 };
 
 const requireMembership = async (groupId: string, userId: string) => {
@@ -282,7 +293,7 @@ router.get('/', async (req, res, next) => {
         space: true,
       },
     });
-    const balancesBySpaceId = await getCompletedBalancesBySpaceIds(
+    const financialsBySpaceId = await getSpaceFinancialSnapshotBySpaceIds(
       memberships.map((membership) => membership.space.id),
     );
     const visibleGroups = Array.from(
@@ -291,7 +302,7 @@ router.get('/', async (req, res, next) => {
           membership.space.id,
           mapSpaceToGroup(
             membership.space,
-            balancesBySpaceId.get(membership.space.id) ?? 0,
+            financialsBySpaceId.get(membership.space.id),
           ),
         ]),
       ).values(),
