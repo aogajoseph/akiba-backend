@@ -92,6 +92,8 @@ model Transaction {
   source        TransactionSource
   phoneNumber   String?
   externalName  String?
+  recipientPhoneNumber String?
+  recipientName String?
   description   String?
   destination   String?
   createdAt     DateTime          @default(now())

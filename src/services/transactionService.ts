@@ -19,6 +19,8 @@ const mapDbTransactionToContractTransaction = (transaction: {
   externalName: string | null;
   id: string;
   phoneNumber: string | null;
+  recipientName?: string | null;
+  recipientPhoneNumber?: string | null;
   reference: string;
   source: TransactionSource | string;
   spaceId: string;
@@ -43,6 +45,8 @@ const mapDbTransactionToContractTransaction = (transaction: {
     source: transaction.source as TransactionSource,
     phoneNumber: transaction.phoneNumber ?? undefined,
     externalName: transaction.externalName ?? undefined,
+    recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
+    recipientName: transaction.recipientName ?? undefined,
     status: transaction.status as TransactionStatus,
     createdAt: transaction.createdAt.toISOString(),
     currency: 'KES',
@@ -72,12 +76,16 @@ export const createWithdrawal = async (
   userId: string,
   dto: CreateWithdrawalRequestDto,
 ): Promise<Transaction> => {
-  const transaction = await createSpaceWithdrawal(groupId, userId, dto.amount, dto.description);
+  const transaction = await createSpaceWithdrawal(groupId, userId, dto.amount, {
+    reason: dto.reason,
+    recipientPhoneNumber: dto.recipientPhoneNumber,
+    recipientName: dto.recipientName,
+  });
 
   return {
     ...transaction,
     currency: dto.currency,
-    description: dto.description,
+    description: dto.reason,
     destination: dto.destination,
   };
 };

@@ -110,12 +110,24 @@ const parseDepositDto = (body: Record<string, unknown>): CreateDepositRequestDto
 const parseWithdrawalDto = (body: Record<string, unknown>): CreateWithdrawalRequestDto => {
   return {
     amount: ensurePositiveNumber(body.amount, 'amount must be a positive number'),
-    currency: ensureNonEmptyString(body.currency, 'currency is required'),
+    recipientPhoneNumber: ensureNonEmptyString(
+      body.recipientPhoneNumber,
+      'recipientPhoneNumber is required',
+    ),
+    recipientName: ensureNonEmptyString(body.recipientName, 'recipientName is required'),
+    reason: ensureNonEmptyString(body.reason, 'reason is required'),
+    currency:
+      body.currency === undefined
+        ? undefined
+        : ensureNonEmptyString(body.currency, 'currency must be a non-empty string'),
     description:
       body.description === undefined
         ? undefined
         : ensureNonEmptyString(body.description, 'description must be a non-empty string'),
-    destination: ensureNonEmptyString(body.destination, 'destination is required'),
+    destination:
+      body.destination === undefined
+        ? undefined
+        : ensureNonEmptyString(body.destination, 'destination must be a non-empty string'),
   };
 };
 

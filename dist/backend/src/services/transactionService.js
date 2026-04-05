@@ -20,6 +20,8 @@ const mapDbTransactionToContractTransaction = (transaction) => {
         source: transaction.source,
         phoneNumber: transaction.phoneNumber ?? undefined,
         externalName: transaction.externalName ?? undefined,
+        recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
+        recipientName: transaction.recipientName ?? undefined,
         status: transaction.status,
         createdAt: transaction.createdAt.toISOString(),
         currency: 'KES',
@@ -39,11 +41,15 @@ const createDeposit = async (groupId, userId, dto) => {
 };
 exports.createDeposit = createDeposit;
 const createWithdrawal = async (groupId, userId, dto) => {
-    const transaction = await (0, groupService_1.createWithdrawal)(groupId, userId, dto.amount, dto.description);
+    const transaction = await (0, groupService_1.createWithdrawal)(groupId, userId, dto.amount, {
+        reason: dto.reason,
+        recipientPhoneNumber: dto.recipientPhoneNumber,
+        recipientName: dto.recipientName,
+    });
     return {
         ...transaction,
         currency: dto.currency,
-        description: dto.description,
+        description: dto.reason,
         destination: dto.destination,
     };
 };

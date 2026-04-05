@@ -66,11 +66,18 @@ const parseDepositDto = (body) => {
 const parseWithdrawalDto = (body) => {
     return {
         amount: (0, http_1.ensurePositiveNumber)(body.amount, 'amount must be a positive number'),
-        currency: (0, http_1.ensureNonEmptyString)(body.currency, 'currency is required'),
+        recipientPhoneNumber: (0, http_1.ensureNonEmptyString)(body.recipientPhoneNumber, 'recipientPhoneNumber is required'),
+        recipientName: (0, http_1.ensureNonEmptyString)(body.recipientName, 'recipientName is required'),
+        reason: (0, http_1.ensureNonEmptyString)(body.reason, 'reason is required'),
+        currency: body.currency === undefined
+            ? undefined
+            : (0, http_1.ensureNonEmptyString)(body.currency, 'currency must be a non-empty string'),
         description: body.description === undefined
             ? undefined
             : (0, http_1.ensureNonEmptyString)(body.description, 'description must be a non-empty string'),
-        destination: (0, http_1.ensureNonEmptyString)(body.destination, 'destination is required'),
+        destination: body.destination === undefined
+            ? undefined
+            : (0, http_1.ensureNonEmptyString)(body.destination, 'destination must be a non-empty string'),
     };
 };
 const requireTransaction = async (groupId, transactionId) => {

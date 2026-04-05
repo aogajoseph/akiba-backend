@@ -77,6 +77,8 @@ const mapDbTransactionToContractTransaction = (transaction) => {
         source: transaction.source,
         phoneNumber: transaction.phoneNumber ?? undefined,
         externalName: transaction.externalName ?? undefined,
+        recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
+        recipientName: transaction.recipientName ?? undefined,
         status: transaction.status,
         createdAt: transaction.createdAt.toISOString(),
         currency: 'KES',
@@ -743,9 +745,18 @@ const createDeposit = async (spaceId, userId, amount, options) => {
     }
 };
 exports.createDeposit = createDeposit;
-const createWithdrawal = async (spaceId, userId, amount, reason) => {
+const createWithdrawal = async (spaceId, userId, amount, details) => {
     if (amount <= 0) {
         throw (0, http_1.createHttpError)(400, 'amount must be a positive number');
+    }
+    if (!details.reason.trim()) {
+        throw (0, http_1.createHttpError)(400, 'reason must be a non-empty string');
+    }
+    if (!details.recipientPhoneNumber.trim()) {
+        throw (0, http_1.createHttpError)(400, 'recipientPhoneNumber must be a non-empty string');
+    }
+    if (!details.recipientName.trim()) {
+        throw (0, http_1.createHttpError)(400, 'recipientName must be a non-empty string');
     }
     const space = await getSpaceOrThrow(spaceId);
     await getSpaceMembershipOrThrow(spaceId, userId);
@@ -787,7 +798,9 @@ const createWithdrawal = async (spaceId, userId, amount, reason) => {
             amount,
             reference: (0, http_1.createId)('withdrawal_ref'),
             source: contracts_1.TransactionSource.BANK_TRANSFER,
-            description: reason,
+            description: details.reason.trim(),
+            recipientPhoneNumber: details.recipientPhoneNumber.trim(),
+            recipientName: details.recipientName.trim(),
         },
     });
     return mapDbTransactionToContractTransaction(withdrawal);
@@ -1115,6 +1128,8 @@ const getTransactionsSummary = async (spaceId) => {
             requestedByUserId: withdrawal.userId ?? `external_${withdrawal.id}`,
             requestedByName: userName,
             amount: Number(withdrawal.amount),
+            recipientName: withdrawal.recipientName ?? undefined,
+            recipientPhoneNumber: withdrawal.recipientPhoneNumber ?? undefined,
             reason: withdrawal.description ?? undefined,
             approvals: approvalIds,
             requiredApprovals: getSpaceApprovalThreshold(space),

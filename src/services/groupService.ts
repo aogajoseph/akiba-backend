@@ -119,6 +119,8 @@ const mapDbTransactionToContractTransaction = (transaction: {
   externalName: string | null;
   id: string;
   phoneNumber: string | null;
+  recipientName?: string | null;
+  recipientPhoneNumber?: string | null;
   reference: string;
   source: TransactionSource | string;
   spaceId: string;
@@ -143,6 +145,8 @@ const mapDbTransactionToContractTransaction = (transaction: {
     source: transaction.source as TransactionSource,
     phoneNumber: transaction.phoneNumber ?? undefined,
     externalName: transaction.externalName ?? undefined,
+    recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
+    recipientName: transaction.recipientName ?? undefined,
     status: transaction.status as TransactionStatus,
     createdAt: transaction.createdAt.toISOString(),
     currency: 'KES',
@@ -1021,10 +1025,26 @@ export const createWithdrawal = async (
   spaceId: string,
   userId: string,
   amount: number,
-  reason?: string,
+  details: {
+    reason: string;
+    recipientPhoneNumber: string;
+    recipientName: string;
+  },
 ): Promise<Transaction> => {
   if (amount <= 0) {
     throw createHttpError(400, 'amount must be a positive number');
+  }
+
+  if (!details.reason.trim()) {
+    throw createHttpError(400, 'reason must be a non-empty string');
+  }
+
+  if (!details.recipientPhoneNumber.trim()) {
+    throw createHttpError(400, 'recipientPhoneNumber must be a non-empty string');
+  }
+
+  if (!details.recipientName.trim()) {
+    throw createHttpError(400, 'recipientName must be a non-empty string');
   }
 
   const space = await getSpaceOrThrow(spaceId);
@@ -1077,7 +1097,9 @@ export const createWithdrawal = async (
       amount,
       reference: createId('withdrawal_ref'),
       source: TransactionSource.BANK_TRANSFER,
-      description: reason,
+      description: details.reason.trim(),
+      recipientPhoneNumber: details.recipientPhoneNumber.trim(),
+      recipientName: details.recipientName.trim(),
     },
   });
 
@@ -1464,6 +1486,8 @@ export const getTransactionsSummary = async (
       requestedByUserId: withdrawal.userId ?? `external_${withdrawal.id}`,
       requestedByName: userName,
       amount: Number(withdrawal.amount),
+      recipientName: withdrawal.recipientName ?? undefined,
+      recipientPhoneNumber: withdrawal.recipientPhoneNumber ?? undefined,
       reason: withdrawal.description ?? undefined,
       approvals: approvalIds,
       requiredApprovals: getSpaceApprovalThreshold(space),

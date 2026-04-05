@@ -84,6 +84,8 @@ const requireTransactionById = async (transactionId: string): Promise<Transactio
     source: transaction.source,
     phoneNumber: transaction.phoneNumber ?? undefined,
     externalName: transaction.externalName ?? undefined,
+    recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
+    recipientName: transaction.recipientName ?? undefined,
     status: transaction.status as Transaction['status'],
     createdAt: transaction.createdAt.toISOString(),
     groupId: transaction.spaceId,

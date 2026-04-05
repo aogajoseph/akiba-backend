@@ -55,6 +55,8 @@ const requireTransactionById = async (transactionId) => {
         source: transaction.source,
         phoneNumber: transaction.phoneNumber ?? undefined,
         externalName: transaction.externalName ?? undefined,
+        recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
+        recipientName: transaction.recipientName ?? undefined,
         status: transaction.status,
         createdAt: transaction.createdAt.toISOString(),
         groupId: transaction.spaceId,

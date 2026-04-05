@@ -234,8 +234,14 @@ router.post('/:spaceId/withdraw', async (req, res, next) => {
         await requireMembership(group.id, user.id);
         const body = (0, http_1.getObjectBody)(req.body);
         const amount = (0, http_1.ensurePositiveNumber)(body.amount, 'amount must be a positive number');
-        const reason = (0, http_1.ensureOptionalNonEmptyString)(body.reason, 'reason must be a non-empty string');
-        const withdrawal = await (0, groupService_1.createWithdrawal)(spaceId, user.id, amount, reason);
+        const reason = (0, http_1.ensureNonEmptyString)(body.reason, 'reason must be a non-empty string');
+        const recipientPhoneNumber = (0, http_1.ensureNonEmptyString)(body.recipientPhoneNumber, 'recipientPhoneNumber must be a non-empty string');
+        const recipientName = (0, http_1.ensureNonEmptyString)(body.recipientName, 'recipientName must be a non-empty string');
+        const withdrawal = await (0, groupService_1.createWithdrawal)(spaceId, user.id, amount, {
+            reason,
+            recipientPhoneNumber,
+            recipientName,
+        });
         res.json({
             data: {
                 success: true,
