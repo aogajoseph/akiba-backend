@@ -1,65 +1,47 @@
-import {
-  Approval,
-  ApprovalStatus,
-  CreateApprovalRequestDto,
-  TransactionStatus,
-} from '../../../shared/contracts';
-import { approvals, groups, transactions } from '../data/store';
-import { createId } from '../utils/http';
+import { Approval } from '../../../shared/contracts';
+import { prisma } from '../lib/prisma';
 
-const updateWithdrawalStatus = (transactionId: string): void => {
-  const transaction = transactions.find((item) => item.id === transactionId);
-
-  if (!transaction) {
-    throw new Error('Transaction not found');
-  }
-
-  const group = groups.find((item) => item.id === transaction.groupId);
-
-  if (!group) {
-    throw new Error('Group not found');
-  }
-
-  const transactionApprovals = approvals.filter((item) => item.transactionId === transactionId);
-  const hasRejection = transactionApprovals.some(
-    (item) => item.status === ApprovalStatus.REJECTED,
-  );
-  const approvalCount = transactionApprovals.filter(
-    (item) => item.status === ApprovalStatus.APPROVED,
-  ).length;
-
-  if (hasRejection) {
-    transaction.status = TransactionStatus.REJECTED;
-    return;
-  }
-
-  if (approvalCount >= group.approvalThreshold) {
-    transaction.status = TransactionStatus.APPROVED;
-    return;
-  }
-
-  transaction.status = TransactionStatus.PENDING_APPROVAL;
-};
-
-export const createApproval = (
-  transactionId: string,
-  signatoryUserId: string,
-  dto: CreateApprovalRequestDto,
-): Approval => {
-  const approval: Approval = {
-    id: createId('approval'),
-    transactionId,
-    signatoryUserId,
-    status: dto.status,
-    createdAt: new Date().toISOString(),
+const mapDbApprovalToContractApproval = (approval: {
+  adminId: string;
+  createdAt: Date;
+  id: string;
+  status: string;
+  transactionId: string;
+}): Approval => {
+  return {
+    id: approval.id,
+    transactionId: approval.transactionId,
+    signatoryUserId: approval.adminId,
+    status: approval.status as Approval['status'],
+    createdAt: approval.createdAt.toISOString(),
   };
-
-  approvals.push(approval);
-  updateWithdrawalStatus(transactionId);
-
-  return approval;
 };
 
-export const listApprovals = (transactionId: string): Approval[] => {
-  return approvals.filter((item) => item.transactionId === transactionId);
+export const listApprovals = async (transactionId: string): Promise<Approval[]> => {
+  const approvals = await prisma.withdrawalApproval.findMany({
+    where: {
+      transactionId,
+    },
+    orderBy: {
+      createdAt: 'asc',
+    },
+  });
+
+  return approvals.map(mapDbApprovalToContractApproval);
+};
+
+export const getApprovalByTransactionAndAdmin = async (
+  transactionId: string,
+  adminId: string,
+): Promise<Approval | null> => {
+  const approval = await prisma.withdrawalApproval.findUnique({
+    where: {
+      transactionId_adminId: {
+        transactionId,
+        adminId,
+      },
+    },
+  });
+
+  return approval ? mapDbApprovalToContractApproval(approval) : null;
 };

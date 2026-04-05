@@ -26,20 +26,7 @@ const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
   'tertiary',
 ];
 const PROMOTABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = ['secondary', 'tertiary'];
-
-type Withdrawal = {
-  id: string;
-  spaceId: string;
-  requestedByUserId: string;
-  amount: number;
-  reason?: string;
-  status: 'pending' | 'approved' | 'completed' | 'failed';
-  approvals: string[];
-  requiredApprovals: number;
-  createdAt: string;
-};
-
-const withdrawals: Withdrawal[] = [];
+const WITHDRAWAL_FEE_RATE = 0.02;
 
 const getMpesaPaybillNumber = (): string => {
   return process.env.MPESA_PAYBILL?.trim() || '522522';
@@ -56,6 +43,7 @@ const isUniqueConstraintError = (error: unknown): boolean => {
 
 const mapDbSpaceToGroup = (space: {
   accountNumber: string | null;
+  approvalThreshold: number;
   createdAt: Date;
   createdById: string;
   deadline: Date | null;
@@ -77,7 +65,7 @@ const mapDbSpaceToGroup = (space: {
     collectedAmount: 0,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
-    approvalThreshold: 1,
+    approvalThreshold: space.approvalThreshold,
     createdAt: space.createdAt.toISOString(),
   };
 };
@@ -120,6 +108,8 @@ const mapDbSpaceMemberToSpaceMember = (member: {
 const mapDbTransactionToContractTransaction = (transaction: {
   amount: Prisma.Decimal | number;
   createdAt: Date;
+  description?: string | null;
+  destination?: string | null;
   externalName: string | null;
   id: string;
   phoneNumber: string | null;
@@ -150,7 +140,128 @@ const mapDbTransactionToContractTransaction = (transaction: {
     status: transaction.status as TransactionStatus,
     createdAt: transaction.createdAt.toISOString(),
     currency: 'KES',
+    description: transaction.description ?? undefined,
+    destination: transaction.destination ?? undefined,
   };
+};
+
+const mapDbWithdrawalApprovalToContractApproval = (approval: {
+  adminId: string;
+  createdAt: Date;
+  id: string;
+  status: string;
+  transactionId: string;
+}) => {
+  return {
+    id: approval.id,
+    transactionId: approval.transactionId,
+    signatoryUserId: approval.adminId,
+    status: approval.status as 'approved' | 'rejected',
+    createdAt: approval.createdAt.toISOString(),
+  };
+};
+
+const roundCurrency = (value: number): number => {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+};
+
+const calculateWithdrawalFee = (amount: number): number => {
+  return roundCurrency(amount * WITHDRAWAL_FEE_RATE);
+};
+
+const getSpaceApprovalThreshold = (space: { approvalThreshold: number | null }): number => {
+  return Math.max(space.approvalThreshold ?? 1, 1);
+};
+
+const getSpaceOrThrow = async (spaceId: string) => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
+
+  if (!space) {
+    throw createHttpError(404, 'Group not found');
+  }
+
+  return space;
+};
+
+const getSpaceMembershipOrThrow = async (spaceId: string, userId: string) => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId,
+      userId,
+    },
+  });
+
+  if (!membership) {
+    throw createHttpError(403, 'You are not a member of this group');
+  }
+
+  return membership;
+};
+
+const requireSpaceAdmin = async (spaceId: string, userId: string) => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId,
+      userId,
+    },
+  });
+
+  if (!membership) {
+    throw createHttpError(403, 'You are not a member of this group');
+  }
+
+  if (membership.role !== 'admin') {
+    throw createHttpError(403, 'Only admins can approve or reject withdrawals');
+  }
+
+  return membership;
+};
+
+export const getAvailableBalanceForSpace = async (spaceId: string): Promise<number> => {
+  const [completedDeposits, reservedWithdrawals, completedFees] = await Promise.all([
+    prisma.transaction.aggregate({
+      where: {
+        spaceId,
+        type: TransactionType.DEPOSIT,
+        status: TransactionStatus.COMPLETED,
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
+    prisma.transaction.aggregate({
+      where: {
+        spaceId,
+        type: TransactionType.WITHDRAWAL,
+        status: {
+          in: [TransactionStatus.APPROVED, TransactionStatus.COMPLETED],
+        },
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
+    prisma.transaction.aggregate({
+      where: {
+        spaceId,
+        type: TransactionType.FEE,
+        status: TransactionStatus.COMPLETED,
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
+  ]);
+
+  const deposits = Number(completedDeposits._sum.amount ?? 0);
+  const withdrawals = Number(reservedWithdrawals._sum.amount ?? 0);
+  const fees = Number(completedFees._sum.amount ?? 0);
+
+  return roundCurrency(deposits - withdrawals - fees);
 };
 
 export const getCompletedBalancesBySpaceIds = async (
@@ -179,7 +290,7 @@ export const getCompletedBalancesBySpaceIds = async (
     const currentBalance = balanceMap.get(item.spaceId) ?? 0;
     const amount = Number(item._sum.amount ?? 0);
     const nextBalance =
-      item.type === TransactionType.WITHDRAWAL
+      item.type === TransactionType.WITHDRAWAL || item.type === TransactionType.FEE
         ? currentBalance - amount
         : currentBalance + amount;
 
@@ -441,6 +552,7 @@ export const createSpace = async (input: {
   imageUrl?: string;
   targetAmount?: number;
   deadline?: string;
+  approvalThreshold?: number;
   createdById: string;
 }): Promise<{ space: Group }> => {
   const accountNumber = `AKB_${Date.now()}`;
@@ -456,6 +568,7 @@ export const createSpace = async (input: {
           deadline: input.deadline ? new Date(input.deadline) : undefined,
           paybillNumber: getMpesaPaybillNumber(),
           accountNumber,
+          approvalThreshold: input.approvalThreshold ?? 1,
           createdById: input.createdById,
         },
       });
@@ -483,7 +596,7 @@ export const createSpace = async (input: {
         collectedAmount: 0,
         deadline: space.deadline ? space.deadline.toISOString() : undefined,
         createdByUserId: space.createdById,
-        approvalThreshold: 1,
+        approvalThreshold: space.approvalThreshold,
         createdAt: space.createdAt.toISOString(),
       },
     };
@@ -847,81 +960,291 @@ export const createWithdrawal = async (
   userId: string,
   amount: number,
   reason?: string,
-): Promise<Withdrawal> => {
+): Promise<Transaction> => {
   if (amount <= 0) {
     throw createHttpError(400, 'amount must be a positive number');
   }
 
-  const group = getGroupOrThrow(spaceId);
-  const currentBalance = group.collectedAmount ?? 0;
+  await getSpaceOrThrow(spaceId);
+  await getSpaceMembershipOrThrow(spaceId, userId);
+  const availableBalance = await getAvailableBalanceForSpace(spaceId);
+  const feeAmount = calculateWithdrawalFee(amount);
 
-  if (currentBalance < amount) {
+  if (amount + feeAmount > availableBalance) {
     throw createHttpError(409, 'Insufficient funds in this space');
   }
 
-  const withdrawal: Withdrawal = {
-    id: `wd_${Date.now()}`,
-    spaceId,
-    requestedByUserId: userId,
-    amount,
-    reason,
-    status: 'pending',
-    approvals: [],
-    requiredApprovals: group.approvalThreshold ?? 1,
-    createdAt: new Date().toISOString(),
-  };
+  const withdrawal = await prisma.transaction.create({
+    data: {
+      spaceId,
+      userId,
+      type: TransactionType.WITHDRAWAL,
+      status: TransactionStatus.PENDING_APPROVAL,
+      amount,
+      reference: createId('withdrawal_ref'),
+      source: TransactionSource.BANK_TRANSFER,
+      description: reason,
+    },
+  });
 
-  withdrawals.push(withdrawal);
-
-  return withdrawal;
+  return mapDbTransactionToContractTransaction(withdrawal);
 };
 
 export const approveWithdrawal = async (
   withdrawalId: string,
   userId: string,
-): Promise<Withdrawal> => {
-  const withdrawal = withdrawals.find((item) => item.id === withdrawalId);
+): Promise<Transaction> => {
+  const withdrawal = await prisma.transaction.findUnique({
+    where: {
+      id: withdrawalId,
+    },
+    include: {
+      space: true,
+      approvals: true,
+    },
+  });
 
   if (!withdrawal) {
     throw createHttpError(404, 'Withdrawal not found');
   }
 
-  if (withdrawal.status !== 'pending') {
-    throw createHttpError(409, 'Withdrawal is no longer pending');
+  if (withdrawal.type !== TransactionType.WITHDRAWAL) {
+    throw createHttpError(400, 'Only withdrawals can be approved');
   }
 
-  if (!isAdminForGroup(withdrawal.spaceId, userId)) {
-    throw createHttpError(403, 'Only admins can approve withdrawals');
+  if (withdrawal.status !== TransactionStatus.PENDING_APPROVAL) {
+    throw createHttpError(409, 'Withdrawal is no longer pending approval');
   }
 
-  if (withdrawal.approvals.includes(userId)) {
-    throw createHttpError(409, 'You have already approved this withdrawal');
+  await requireSpaceAdmin(withdrawal.spaceId, userId);
+
+  try {
+    const updatedWithdrawal = await prisma.$transaction(async (tx) => {
+      await tx.withdrawalApproval.create({
+        data: {
+          transactionId: withdrawal.id,
+          adminId: userId,
+          status: 'approved',
+        },
+      });
+
+      const approvedCount = await tx.withdrawalApproval.count({
+        where: {
+          transactionId: withdrawal.id,
+          status: 'approved',
+        },
+      });
+
+      const nextStatus =
+        approvedCount >= getSpaceApprovalThreshold(withdrawal.space)
+          ? TransactionStatus.APPROVED
+          : TransactionStatus.PENDING_APPROVAL;
+
+      return tx.transaction.update({
+        where: {
+          id: withdrawal.id,
+        },
+        data: {
+          status: nextStatus,
+        },
+      });
+    });
+
+    return mapDbTransactionToContractTransaction(updatedWithdrawal);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw createHttpError(409, 'You have already approved or rejected this withdrawal');
+    }
+
+    throw error;
+  }
+};
+
+export const rejectWithdrawal = async (
+  transactionId: string,
+  userId: string,
+): Promise<Transaction> => {
+  const withdrawal = await prisma.transaction.findUnique({
+    where: {
+      id: transactionId,
+    },
+  });
+
+  if (!withdrawal) {
+    throw createHttpError(404, 'Withdrawal not found');
   }
 
-  withdrawal.approvals.push(userId);
+  if (withdrawal.type !== TransactionType.WITHDRAWAL) {
+    throw createHttpError(400, 'Only withdrawals can be rejected');
+  }
 
-  if (withdrawal.approvals.length >= withdrawal.requiredApprovals) {
-    withdrawal.status = 'approved';
+  if (withdrawal.status !== TransactionStatus.PENDING_APPROVAL) {
+    throw createHttpError(409, 'Only pending withdrawals can be rejected');
+  }
 
-    setTimeout(() => {
-      if (withdrawal.status !== 'approved') {
-        return;
+  await requireSpaceAdmin(withdrawal.spaceId, userId);
+
+  try {
+    const rejectedWithdrawal = await prisma.$transaction(async (tx) => {
+      await tx.withdrawalApproval.create({
+        data: {
+          transactionId,
+          adminId: userId,
+          status: 'rejected',
+        },
+      });
+
+      return tx.transaction.update({
+        where: {
+          id: transactionId,
+        },
+        data: {
+          status: TransactionStatus.REJECTED,
+        },
+      });
+    });
+
+    return mapDbTransactionToContractTransaction(rejectedWithdrawal);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw createHttpError(409, 'You have already approved or rejected this withdrawal');
+    }
+
+    throw error;
+  }
+};
+
+export const executeWithdrawal = async (
+  transactionId: string,
+  executorUserId?: string,
+): Promise<{ withdrawal: Transaction; fee: Transaction | null }> => {
+  const result = await prisma.$transaction(async (tx) => {
+    const withdrawal = await tx.transaction.findUnique({
+      where: {
+        id: transactionId,
+      },
+    });
+
+    if (!withdrawal) {
+      throw createHttpError(404, 'Withdrawal not found');
+    }
+
+    if (withdrawal.type !== TransactionType.WITHDRAWAL) {
+      throw createHttpError(400, 'Only withdrawals can be executed');
+    }
+
+    if (withdrawal.status !== TransactionStatus.APPROVED) {
+      throw createHttpError(409, 'Withdrawal must be approved before execution');
+    }
+
+    if (executorUserId) {
+      const executorMembership = await tx.spaceMember.findFirst({
+        where: {
+          spaceId: withdrawal.spaceId,
+          userId: executorUserId,
+        },
+      });
+
+      if (!executorMembership || executorMembership.role !== 'admin') {
+        throw createHttpError(403, 'Only admins can execute withdrawals');
       }
+    }
 
-      const group = getGroupOrThrow(withdrawal.spaceId);
-      const currentBalance = group.collectedAmount ?? 0;
+    const feeAmount = calculateWithdrawalFee(Number(withdrawal.amount));
+    const [completedDeposits, reservedWithdrawals, completedFees] = await Promise.all([
+      tx.transaction.aggregate({
+        where: {
+          spaceId: withdrawal.spaceId,
+          type: TransactionType.DEPOSIT,
+          status: TransactionStatus.COMPLETED,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      tx.transaction.aggregate({
+        where: {
+          spaceId: withdrawal.spaceId,
+          type: TransactionType.WITHDRAWAL,
+          status: {
+            in: [TransactionStatus.APPROVED, TransactionStatus.COMPLETED],
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      tx.transaction.aggregate({
+        where: {
+          spaceId: withdrawal.spaceId,
+          type: TransactionType.FEE,
+          status: TransactionStatus.COMPLETED,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+    ]);
 
-      if (currentBalance < withdrawal.amount) {
-        withdrawal.status = 'failed';
-        return;
-      }
+    const availableAfterReservation = roundCurrency(
+      Number(completedDeposits._sum.amount ?? 0) -
+        Number(reservedWithdrawals._sum.amount ?? 0) -
+        Number(completedFees._sum.amount ?? 0),
+    );
 
-      group.collectedAmount = currentBalance - withdrawal.amount;
-      withdrawal.status = 'completed';
-    }, 2500);
-  }
+    if (feeAmount > availableAfterReservation) {
+      throw createHttpError(409, 'Insufficient funds to cover withdrawal fees');
+    }
 
-  return withdrawal;
+    let feeTransaction: Prisma.TransactionGetPayload<Record<string, never>> | null = null;
+
+    if (feeAmount > 0) {
+      feeTransaction = await tx.transaction.create({
+        data: {
+          spaceId: withdrawal.spaceId,
+          userId: withdrawal.userId,
+          type: TransactionType.FEE,
+          status: TransactionStatus.COMPLETED,
+          amount: feeAmount,
+          reference: `${withdrawal.reference}_fee`,
+          source: TransactionSource.SYSTEM_FEE,
+          description: 'Withdrawal processing fee',
+        },
+      });
+    }
+
+    const completedWithdrawal = await tx.transaction.update({
+      where: {
+        id: transactionId,
+      },
+      data: {
+        status: TransactionStatus.COMPLETED,
+      },
+    });
+
+    return {
+      fee: feeTransaction,
+      withdrawal: completedWithdrawal,
+    };
+  });
+
+  return {
+    withdrawal: mapDbTransactionToContractTransaction(result.withdrawal),
+    fee: result.fee ? mapDbTransactionToContractTransaction(result.fee) : null,
+  };
+};
+
+export const listWithdrawalApprovals = async (transactionId: string) => {
+  const approvals = await prisma.withdrawalApproval.findMany({
+    where: {
+      transactionId,
+    },
+    orderBy: {
+      createdAt: 'asc',
+    },
+  });
+
+  return approvals.map(mapDbWithdrawalApprovalToContractApproval);
 };
 
 export const getTransactionsSummary = async (
@@ -937,7 +1260,7 @@ export const getTransactionsSummary = async (
     throw createHttpError(404, 'Group not found');
   }
 
-  const [completedTransactions, pendingDepositTransactions] = await Promise.all([
+  const [completedTransactions, pendingDepositTransactions, activeWithdrawals] = await Promise.all([
     prisma.transaction.findMany({
       where: {
         spaceId,
@@ -962,6 +1285,26 @@ export const getTransactionsSummary = async (
         createdAt: 'desc',
       },
     }),
+    prisma.transaction.findMany({
+      where: {
+        spaceId,
+        type: TransactionType.WITHDRAWAL,
+        status: {
+          in: [TransactionStatus.PENDING_APPROVAL, TransactionStatus.APPROVED],
+        },
+      },
+      include: {
+        approvals: {
+          where: {
+            status: 'approved',
+          },
+        },
+        user: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    }),
   ]);
 
   const completedDeposits = completedTransactions.filter(
@@ -970,16 +1313,9 @@ export const getTransactionsSummary = async (
   const completedWithdrawals = completedTransactions.filter(
     (transaction) => transaction.type === TransactionType.WITHDRAWAL,
   );
-  const pendingWithdrawals = withdrawals
-    .filter(
-      (withdrawal) =>
-        withdrawal.spaceId === spaceId &&
-        (withdrawal.status === 'pending' || withdrawal.status === 'approved'),
-    );
-  const pendingUserIds = [
-    ...pendingWithdrawals.map((withdrawal) => withdrawal.requestedByUserId),
-  ];
-  const usersById = await getUsersByIds(pendingUserIds);
+  const completedFees = completedTransactions.filter(
+    (transaction) => transaction.type === TransactionType.FEE,
+  );
   const pendingDepositsSummary = pendingDepositTransactions.map((deposit) => {
     const userName =
       deposit.user?.name ??
@@ -997,19 +1333,21 @@ export const getTransactionsSummary = async (
       createdAt: deposit.createdAt.toISOString(),
     };
   });
-  const pendingWithdrawalsSummary = pendingWithdrawals.map((withdrawal) => {
-    const user = usersById.get(withdrawal.requestedByUserId);
+  const pendingWithdrawalsSummary = activeWithdrawals.map((withdrawal) => {
+    const userName = withdrawal.user?.name ?? withdrawal.userId ?? 'Unknown member';
+    const approvalIds = withdrawal.approvals.map((approval) => approval.adminId);
 
     return {
       id: withdrawal.id,
-      requestedByUserId: withdrawal.requestedByUserId,
-      requestedByName: user?.name ?? withdrawal.requestedByUserId,
-      amount: withdrawal.amount,
-      reason: withdrawal.reason,
-      approvals: withdrawal.approvals,
-      requiredApprovals: withdrawal.requiredApprovals,
-      status: withdrawal.status,
-      createdAt: withdrawal.createdAt,
+      requestedByUserId: withdrawal.userId ?? `external_${withdrawal.id}`,
+      requestedByName: userName,
+      amount: Number(withdrawal.amount),
+      reason: withdrawal.description ?? undefined,
+      approvals: approvalIds,
+      requiredApprovals: getSpaceApprovalThreshold(space),
+      status:
+        withdrawal.status === TransactionStatus.APPROVED ? 'approved' : 'pending',
+      createdAt: withdrawal.createdAt.toISOString(),
     };
   });
   const totalDeposits = completedDeposits.reduce(
@@ -1018,6 +1356,10 @@ export const getTransactionsSummary = async (
   );
   const totalWithdrawals = completedWithdrawals.reduce(
     (sum, withdrawal) => sum + Number(withdrawal.amount),
+    0,
+  );
+  const totalFees = completedFees.reduce(
+    (sum, fee) => sum + Number(fee.amount),
     0,
   );
   const depositsOverTime = aggregateByDate(
@@ -1036,7 +1378,7 @@ export const getTransactionsSummary = async (
   return {
     totalDeposits,
     totalWithdrawals,
-    currentBalance: totalDeposits - totalWithdrawals,
+    currentBalance: totalDeposits - totalWithdrawals - totalFees,
     depositsOverTime,
     withdrawalsOverTime,
     pendingWithdrawals: pendingWithdrawalsSummary,

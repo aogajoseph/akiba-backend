@@ -69,7 +69,7 @@ const getGroupById = async (groupId: string): Promise<Group> => {
     collectedAmount: 0,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
-    approvalThreshold: 1,
+    approvalThreshold: space.approvalThreshold,
     createdAt: space.createdAt.toISOString(),
   };
 };
@@ -160,7 +160,7 @@ router.post('/withdrawals', async (req: Request<GroupParams>, res, next) => {
     await getGroupById(groupId);
     await requireMembership(groupId, user.id);
     const dto = parseWithdrawalDto(getObjectBody(req.body));
-    const transaction = createWithdrawal(groupId, user.id, dto);
+    const transaction = await createWithdrawal(groupId, user.id, dto);
 
     const response: ApiResponse<CreateWithdrawalResponseDto> = {
       data: {

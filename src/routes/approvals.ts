@@ -5,16 +5,12 @@ import {
   ApprovalStatus,
   CreateApprovalRequestDto,
   CreateApprovalResponseDto,
-  Group,
-  GroupMember,
-  GroupRole,
   ListApprovalsResponseDto,
   Transaction,
-  TransactionStatus,
   TransactionType,
   User,
 } from '../../../shared/contracts';
-import { approvals, groupMembers, groups, transactions } from '../data/store';
+import { prisma } from '../lib/prisma';
 import {
   createHttpError,
   ensureEnumValue,
@@ -23,7 +19,8 @@ import {
 } from '../utils/http';
 import { getCurrentUserOrThrow } from '../utils/auth';
 import { getTransaction } from '../services/transactionService';
-import { createApproval, listApprovals } from '../services/approvalService';
+import { approveWithdrawal, rejectWithdrawal } from '../services/groupService';
+import { getApprovalByTransactionAndAdmin, listApprovals } from '../services/approvalService';
 
 const router = Router({ mergeParams: true });
 
@@ -37,8 +34,12 @@ const getCurrentUser = async (headerValue: string | undefined): Promise<User> =>
   return getCurrentUserOrThrow(userId);
 };
 
-const getGroupById = (groupId: string): Group => {
-  const group = groups.find((item) => item.id === groupId);
+const getGroupById = async (groupId: string) => {
+  const group = await prisma.space.findUnique({
+    where: {
+      id: groupId,
+    },
+  });
 
   if (!group) {
     throw createHttpError(404, 'Group not found');
@@ -47,10 +48,13 @@ const getGroupById = (groupId: string): Group => {
   return group;
 };
 
-const requireMembership = (groupId: string, userId: string): GroupMember => {
-  const membership = groupMembers.find(
-    (item) => item.groupId === groupId && item.userId === userId,
-  );
+const requireMembership = async (groupId: string, userId: string) => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId: groupId,
+      userId,
+    },
+  });
 
   if (!membership) {
     throw createHttpError(403, 'You are not a member of this group');
@@ -59,14 +63,34 @@ const requireMembership = (groupId: string, userId: string): GroupMember => {
   return membership;
 };
 
-const requireTransactionById = (transactionId: string): Transaction => {
-  const transaction = transactions.find((item) => item.id === transactionId);
+const requireTransactionById = async (transactionId: string): Promise<Transaction> => {
+  const transaction = await prisma.transaction.findUnique({
+    where: {
+      id: transactionId,
+    },
+  });
 
   if (!transaction) {
     throw createHttpError(404, 'Transaction not found');
   }
 
-  return transaction;
+  return {
+    id: transaction.id,
+    spaceId: transaction.spaceId,
+    userId: transaction.userId ?? undefined,
+    type: transaction.type as TransactionType,
+    amount: Number(transaction.amount),
+    reference: transaction.reference,
+    source: transaction.source,
+    phoneNumber: transaction.phoneNumber ?? undefined,
+    externalName: transaction.externalName ?? undefined,
+    status: transaction.status as Transaction['status'],
+    createdAt: transaction.createdAt.toISOString(),
+    groupId: transaction.spaceId,
+    initiatedByUserId: transaction.userId ?? undefined,
+    description: transaction.description ?? undefined,
+    destination: transaction.destination ?? undefined,
+  };
 };
 
 const requireTransactionInGroup = async (
@@ -86,9 +110,9 @@ router.get('/', async (req: Request<ApprovalParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
-    const transaction = requireTransactionById(transactionId);
+    await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
+    const transaction = await requireTransactionById(transactionId);
 
     if (transaction.groupId !== groupId) {
       throw createHttpError(400, 'groupId does not match the transaction group');
@@ -96,7 +120,7 @@ router.get('/', async (req: Request<ApprovalParams>, res, next) => {
 
     const response: ApiResponse<ListApprovalsResponseDto> = {
       data: {
-        approvals: listApprovals(transactionId),
+        approvals: await listApprovals(transactionId),
       },
     };
 
@@ -110,9 +134,9 @@ router.post('/', async (req: Request<ApprovalParams>, res, next) => {
   try {
     const { groupId, transactionId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    const group = getGroupById(groupId);
-    const membership = requireMembership(groupId, user.id);
-    const transaction = requireTransactionById(transactionId);
+    const group = await getGroupById(groupId);
+    await requireMembership(groupId, user.id);
+    const transaction = await requireTransactionById(transactionId);
 
     if (transaction.groupId !== group.id) {
       throw createHttpError(400, 'groupId does not match the transaction group');
@@ -120,23 +144,6 @@ router.post('/', async (req: Request<ApprovalParams>, res, next) => {
 
     if (transaction.type !== TransactionType.WITHDRAWAL) {
       throw createHttpError(400, 'Only withdrawals can be approved');
-    }
-
-    if (membership.role !== GroupRole.SIGNATORY) {
-      throw createHttpError(403, 'Only signatories can approve or reject withdrawals');
-    }
-
-    if (transaction.status !== TransactionStatus.PENDING_APPROVAL) {
-      throw createHttpError(409, 'Only pending withdrawals can be approved or rejected');
-    }
-
-    const existingApproval = approvals.find(
-      (item) =>
-        item.transactionId === transaction.id && item.signatoryUserId === user.id,
-    );
-
-    if (existingApproval) {
-      throw createHttpError(409, 'You have already approved or rejected this withdrawal');
     }
 
     const body = getObjectBody(req.body);
@@ -148,7 +155,17 @@ router.post('/', async (req: Request<ApprovalParams>, res, next) => {
       ),
     };
 
-    const approval = createApproval(transaction.id, user.id, dto);
+    if (dto.status === ApprovalStatus.APPROVED) {
+      await approveWithdrawal(transaction.id, user.id);
+    } else {
+      await rejectWithdrawal(transaction.id, user.id);
+    }
+    const approval = await getApprovalByTransactionAndAdmin(transaction.id, user.id);
+
+    if (!approval) {
+      throw createHttpError(500, 'Approval could not be recorded');
+    }
+
     const updatedTransaction = await requireTransactionInGroup(groupId, transactionId);
 
     const response: ApiResponse<CreateApprovalResponseDto> = {

@@ -10,6 +10,7 @@ var TransactionType;
 (function (TransactionType) {
     TransactionType["DEPOSIT"] = "deposit";
     TransactionType["WITHDRAWAL"] = "withdrawal";
+    TransactionType["FEE"] = "fee";
 })(TransactionType || (exports.TransactionType = TransactionType = {}));
 var TransactionStatus;
 (function (TransactionStatus) {
@@ -28,6 +29,7 @@ var TransactionSource;
     TransactionSource["MPESA_STK"] = "mpesa_stk";
     TransactionSource["CARD"] = "card";
     TransactionSource["BANK_TRANSFER"] = "bank_transfer";
+    TransactionSource["SYSTEM_FEE"] = "system_fee";
 })(TransactionSource || (exports.TransactionSource = TransactionSource = {}));
 var ApprovalStatus;
 (function (ApprovalStatus) {

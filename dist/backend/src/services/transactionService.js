@@ -3,8 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTransactionsSummary = exports.getTransaction = exports.listTransactions = exports.createWithdrawal = exports.createDeposit = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const prisma_1 = require("../lib/prisma");
-const store_1 = require("../data/store");
-const http_1 = require("../utils/http");
 const groupService_1 = require("./groupService");
 const mapDbTransactionToContractTransaction = (transaction) => {
     const amount = typeof transaction.amount === 'number'
@@ -25,13 +23,9 @@ const mapDbTransactionToContractTransaction = (transaction) => {
         status: transaction.status,
         createdAt: transaction.createdAt.toISOString(),
         currency: 'KES',
+        description: transaction.description ?? undefined,
+        destination: transaction.destination ?? undefined,
     };
-};
-const mergeTransactions = (persistedTransactions, legacyTransactions) => {
-    const persistedIds = new Set(persistedTransactions.map((item) => item.id));
-    const persistedReferences = new Set(persistedTransactions.map((item) => item.reference));
-    const uniqueLegacyTransactions = legacyTransactions.filter((item) => !persistedIds.has(item.id) && !persistedReferences.has(item.reference));
-    return [...persistedTransactions, ...uniqueLegacyTransactions].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 };
 const createDeposit = async (groupId, userId, dto) => {
     const transaction = await (0, groupService_1.createDeposit)(groupId, userId, dto.amount, {
@@ -44,25 +38,14 @@ const createDeposit = async (groupId, userId, dto) => {
     };
 };
 exports.createDeposit = createDeposit;
-const createWithdrawal = (groupId, userId, dto) => {
-    const transaction = {
-        id: (0, http_1.createId)('txn'),
-        spaceId: groupId,
-        userId,
-        groupId,
-        initiatedByUserId: userId,
-        type: contracts_1.TransactionType.WITHDRAWAL,
-        amount: dto.amount,
-        reference: (0, http_1.createId)('withdrawal_ref'),
-        source: contracts_1.TransactionSource.BANK_TRANSFER,
+const createWithdrawal = async (groupId, userId, dto) => {
+    const transaction = await (0, groupService_1.createWithdrawal)(groupId, userId, dto.amount, dto.description);
+    return {
+        ...transaction,
         currency: dto.currency,
         description: dto.description,
         destination: dto.destination,
-        status: contracts_1.TransactionStatus.PENDING_APPROVAL,
-        createdAt: new Date().toISOString(),
     };
-    store_1.transactions.push(transaction);
-    return transaction;
 };
 exports.createWithdrawal = createWithdrawal;
 const listTransactions = async (groupId) => {
@@ -74,9 +57,7 @@ const listTransactions = async (groupId) => {
             createdAt: 'desc',
         },
     });
-    const mappedPersistedTransactions = persistedTransactions.map(mapDbTransactionToContractTransaction);
-    const legacyTransactions = store_1.transactions.filter((item) => item.groupId === groupId);
-    return mergeTransactions(mappedPersistedTransactions, legacyTransactions);
+    return persistedTransactions.map(mapDbTransactionToContractTransaction);
 };
 exports.listTransactions = listTransactions;
 const getTransaction = (groupId, transactionId) => {
@@ -88,7 +69,7 @@ const getTransaction = (groupId, transactionId) => {
         if (transaction && transaction.spaceId === groupId) {
             return mapDbTransactionToContractTransaction(transaction);
         }
-        return store_1.transactions.find((item) => item.groupId === groupId && item.id === transactionId);
+        return undefined;
     });
 };
 exports.getTransaction = getTransaction;
@@ -124,10 +105,13 @@ const getTransactionsSummary = async (groupId) => {
     const totalWithdrawals = completedTransactions
         .filter((transaction) => transaction.type === contracts_1.TransactionType.WITHDRAWAL)
         .reduce((sum, transaction) => sum + transaction.amount, 0);
+    const totalFees = completedTransactions
+        .filter((transaction) => transaction.type === contracts_1.TransactionType.FEE)
+        .reduce((sum, transaction) => sum + transaction.amount, 0);
     return {
         totalDeposits,
         totalWithdrawals,
-        currentBalance: totalDeposits - totalWithdrawals,
+        currentBalance: totalDeposits - totalWithdrawals - totalFees,
         depositsOverTime: buildRunningTotals(allTransactions, contracts_1.TransactionType.DEPOSIT),
         withdrawalsOverTime: buildRunningTotals(allTransactions, contracts_1.TransactionType.WITHDRAWAL),
         pendingWithdrawals: [],

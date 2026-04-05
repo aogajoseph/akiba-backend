@@ -31,7 +31,7 @@ const getGroupById = async (groupId) => {
         collectedAmount: 0,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
-        approvalThreshold: 1,
+        approvalThreshold: space.approvalThreshold,
         createdAt: space.createdAt.toISOString(),
     };
 };
@@ -106,7 +106,7 @@ router.post('/withdrawals', async (req, res, next) => {
         await getGroupById(groupId);
         await requireMembership(groupId, user.id);
         const dto = parseWithdrawalDto((0, http_1.getObjectBody)(req.body));
-        const transaction = (0, transactionService_1.createWithdrawal)(groupId, user.id, dto);
+        const transaction = await (0, transactionService_1.createWithdrawal)(groupId, user.id, dto);
         const response = {
             data: {
                 transaction,

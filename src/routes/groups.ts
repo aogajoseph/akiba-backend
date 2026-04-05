@@ -32,6 +32,7 @@ import {
 } from '../utils/http';
 import { getCurrentUserOrThrow } from '../utils/auth';
 import {
+  executeWithdrawal,
   approveWithdrawal,
   createDeposit,
   createSpace,
@@ -43,6 +44,7 @@ import {
   joinSpace,
   leaveSpace,
   promoteMember,
+  rejectWithdrawal,
   revokeMember,
   updateGroup,
 } from '../services/groupService';
@@ -73,6 +75,7 @@ const getDefaultPaybillNumber = (): string => {
 
 const mapSpaceToGroup = (space: {
   accountNumber: string | null;
+  approvalThreshold: number;
   createdAt: Date;
   createdById: string;
   deadline: Date | null;
@@ -94,7 +97,7 @@ const mapSpaceToGroup = (space: {
     collectedAmount,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
-    approvalThreshold: 1,
+    approvalThreshold: space.approvalThreshold,
     createdAt: space.createdAt.toISOString(),
   };
 };
@@ -248,6 +251,7 @@ router.post('/', async (req, res, next) => {
       imageUrl: dto.image,
       targetAmount: dto.targetAmount,
       deadline: dto.deadline,
+      approvalThreshold: dto.approvalThreshold,
       createdById: user.id,
     });
 
@@ -394,11 +398,60 @@ router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
   }
 });
 
+router.post('/transactions/:transactionId/approve', async (req, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const withdrawal = await approveWithdrawal(req.params.transactionId, user.id);
+
+    res.json({
+      data: {
+        success: true,
+        withdrawal,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/transactions/:transactionId/reject', async (req, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const withdrawal = await rejectWithdrawal(req.params.transactionId, user.id);
+
+    res.json({
+      data: {
+        success: true,
+        withdrawal,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/transactions/:transactionId/execute', async (req, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const result = await executeWithdrawal(req.params.transactionId, user.id);
+
+    res.json({
+      data: {
+        success: true,
+        withdrawal: result.withdrawal,
+        fee: result.fee,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    const membership = await requireMembership(req.params.groupId, user.id);
-    const group = mapSpaceToGroup(membership.space);
+    await requireMembership(req.params.groupId, user.id);
+    const group = await getGroupById(req.params.groupId);
 
     const response: ApiResponse<GetGroupResponseDto> = {
       data: {

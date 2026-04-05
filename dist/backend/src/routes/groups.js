@@ -26,7 +26,7 @@ const mapSpaceToGroup = (space, collectedAmount = 0) => {
         collectedAmount,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
-        approvalThreshold: 1,
+        approvalThreshold: space.approvalThreshold,
         createdAt: space.createdAt.toISOString(),
     };
 };
@@ -135,6 +135,7 @@ router.post('/', async (req, res, next) => {
             imageUrl: dto.image,
             targetAmount: dto.targetAmount,
             deadline: dto.deadline,
+            approvalThreshold: dto.approvalThreshold,
             createdById: user.id,
         });
         const response = {
@@ -254,11 +255,57 @@ router.post('/withdrawals/:withdrawalId/approve', async (req, res, next) => {
         next(error);
     }
 });
+router.post('/transactions/:transactionId/approve', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const withdrawal = await (0, groupService_1.approveWithdrawal)(req.params.transactionId, user.id);
+        res.json({
+            data: {
+                success: true,
+                withdrawal,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/transactions/:transactionId/reject', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const withdrawal = await (0, groupService_1.rejectWithdrawal)(req.params.transactionId, user.id);
+        res.json({
+            data: {
+                success: true,
+                withdrawal,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/transactions/:transactionId/execute', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const result = await (0, groupService_1.executeWithdrawal)(req.params.transactionId, user.id);
+        res.json({
+            data: {
+                success: true,
+                withdrawal: result.withdrawal,
+                fee: result.fee,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.get('/:groupId', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        const membership = await requireMembership(req.params.groupId, user.id);
-        const group = mapSpaceToGroup(membership.space);
+        await requireMembership(req.params.groupId, user.id);
+        const group = await getGroupById(req.params.groupId);
         const response = {
             data: {
                 group,
