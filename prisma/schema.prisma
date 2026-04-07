@@ -29,6 +29,7 @@ enum TransactionStatus {
 }
 
 enum TransactionSource {
+  mpesa
   mpesa_paybill
   mpesa_stk
   card

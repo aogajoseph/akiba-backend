@@ -706,34 +706,41 @@ const processMpesaWebhookPayment = async (input) => {
     }
 };
 exports.processMpesaWebhookPayment = processMpesaWebhookPayment;
-const createDeposit = async (spaceId, userId, amount, options) => {
-    if (amount <= 0) {
+const createDeposit = async (input) => {
+    if (input.amount <= 0) {
         throw (0, http_1.createHttpError)(400, 'amount must be a positive number');
+    }
+    if (input.source !== contracts_1.TransactionSource.MPESA) {
+        throw (0, http_1.createHttpError)(400, 'Payment method not yet supported');
+    }
+    if (!input.phoneNumber) {
+        throw (0, http_1.createHttpError)(400, 'phoneNumber must be a valid Kenyan phone number');
     }
     const space = await prisma_1.prisma.space.findUnique({
         where: {
-            id: spaceId,
+            id: input.spaceId,
         },
     });
     if (!space) {
         throw (0, http_1.createHttpError)(404, 'Group not found');
     }
-    const reference = options?.reference?.trim() || (0, http_1.createId)('deposit_ref');
-    const transactionStatus = userId ? contracts_1.TransactionStatus.INITIATED : contracts_1.TransactionStatus.PENDING;
+    const reference = input.reference?.trim() || (0, http_1.createId)('deposit_ref');
+    const transactionStatus = input.userId
+        ? contracts_1.TransactionStatus.INITIATED
+        : contracts_1.TransactionStatus.PENDING;
+    const normalizedPhoneNumber = normalizeStoredPhoneNumber(input.phoneNumber, 'phoneNumber');
     try {
         const transaction = await prisma_1.prisma.transaction.create({
             data: {
-                spaceId,
-                userId,
+                spaceId: input.spaceId,
+                userId: input.userId,
                 type: contracts_1.TransactionType.DEPOSIT,
                 status: transactionStatus,
-                amount,
+                amount: input.amount,
                 reference,
-                source: options?.source ?? contracts_1.TransactionSource.MPESA_STK,
-                phoneNumber: options?.phoneNumber
-                    ? normalizeStoredPhoneNumber(options.phoneNumber, 'phoneNumber')
-                    : undefined,
-                externalName: options?.externalName,
+                source: input.source,
+                phoneNumber: normalizedPhoneNumber,
+                externalName: input.externalName,
             },
         });
         return mapDbTransactionToContractTransaction(transaction);

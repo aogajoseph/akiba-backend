@@ -60,14 +60,16 @@ export const createDeposit = async (
   userId: string,
   dto: CreateDepositRequestDto,
 ): Promise<Transaction> => {
-  const transaction = await createSpaceDeposit(groupId, userId, dto.amount, {
-    source: TransactionSource.MPESA_STK,
+  const transaction = await createSpaceDeposit({
+    amount: dto.amount,
+    phoneNumber: dto.phoneNumber,
+    source: dto.source,
+    spaceId: dto.spaceId,
+    userId,
   });
 
   return {
     ...transaction,
-    currency: dto.currency,
-    description: dto.description,
   };
 };
 

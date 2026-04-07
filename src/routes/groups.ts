@@ -345,19 +345,24 @@ router.post('/:spaceId/deposit', async (req: Request<SpaceParams>, res, next) =>
     const group = await getGroupById(spaceId);
     await requireMembership(group.id, user.id);
     const body = getObjectBody(req.body);
+    const bodySpaceId = ensureNonEmptyString(body.spaceId, 'spaceId is required');
     const amount = ensurePositiveNumber(body.amount, 'amount must be a positive number');
+    const source = ensureNonEmptyString(body.source, 'source is required');
     const phoneNumber = ensureOptionalNonEmptyString(
       body.phoneNumber,
       'phoneNumber must be a non-empty string',
     );
-    const externalName = ensureOptionalNonEmptyString(
-      body.externalName,
-      'externalName must be a non-empty string',
-    );
-    const deposit = await createDeposit(spaceId, user.id, amount, {
+
+    if (bodySpaceId !== spaceId) {
+      throw createHttpError(400, 'spaceId does not match route parameter');
+    }
+
+    const deposit = await createDeposit({
+      amount,
       phoneNumber,
-      externalName,
-      source: TransactionSource.MPESA_STK,
+      source: source as TransactionSource,
+      spaceId,
+      userId: user.id,
     });
 
     res.json({

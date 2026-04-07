@@ -13,6 +13,7 @@ import {
   GroupRole,
   ListTransactionsResponseDto,
   Transaction,
+  TransactionSource,
   User,
 } from '../../../shared/contracts';
 import { prisma } from '../lib/prisma';
@@ -98,12 +99,13 @@ const requireMembership = async (groupId: string, userId: string): Promise<Group
 
 const parseDepositDto = (body: Record<string, unknown>): CreateDepositRequestDto => {
   return {
+    spaceId: ensureNonEmptyString(body.spaceId, 'spaceId is required'),
     amount: ensurePositiveNumber(body.amount, 'amount must be a positive number'),
-    currency: ensureNonEmptyString(body.currency, 'currency is required'),
-    description:
-      body.description === undefined
+    source: ensureNonEmptyString(body.source, 'source is required') as TransactionSource,
+    phoneNumber:
+      body.phoneNumber === undefined
         ? undefined
-        : ensureNonEmptyString(body.description, 'description must be a non-empty string'),
+        : ensureNonEmptyString(body.phoneNumber, 'phoneNumber must be a non-empty string'),
   };
 };
 
@@ -151,6 +153,11 @@ router.post('/deposits', async (req: Request<GroupParams>, res, next) => {
     await getGroupById(groupId);
     await requireMembership(groupId, user.id);
     const dto = parseDepositDto(getObjectBody(req.body));
+
+    if (dto.spaceId !== groupId) {
+      throw createHttpError(400, 'spaceId does not match route parameter');
+    }
+
     const transaction = await createDeposit(groupId, user.id, dto);
 
     const response: ApiResponse<CreateDepositResponseDto> = {

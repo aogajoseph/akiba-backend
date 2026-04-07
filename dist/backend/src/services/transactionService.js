@@ -30,13 +30,15 @@ const mapDbTransactionToContractTransaction = (transaction) => {
     };
 };
 const createDeposit = async (groupId, userId, dto) => {
-    const transaction = await (0, groupService_1.createDeposit)(groupId, userId, dto.amount, {
-        source: contracts_1.TransactionSource.MPESA_STK,
+    const transaction = await (0, groupService_1.createDeposit)({
+        amount: dto.amount,
+        phoneNumber: dto.phoneNumber,
+        source: dto.source,
+        spaceId: dto.spaceId,
+        userId,
     });
     return {
         ...transaction,
-        currency: dto.currency,
-        description: dto.description,
     };
 };
 exports.createDeposit = createDeposit;

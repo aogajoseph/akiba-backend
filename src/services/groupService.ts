@@ -964,23 +964,31 @@ export const processMpesaWebhookPayment = async (
 };
 
 export const createDeposit = async (
-  spaceId: string,
-  userId: string | null,
-  amount: number,
-  options?: {
-    externalName?: string;
+  input: {
+    amount: number;
     phoneNumber?: string;
     reference?: string;
-    source?: TransactionSource;
+    source: TransactionSource;
+    spaceId: string;
+    userId: string | null;
+    externalName?: string;
   },
 ): Promise<Transaction> => {
-  if (amount <= 0) {
+  if (input.amount <= 0) {
     throw createHttpError(400, 'amount must be a positive number');
+  }
+
+  if (input.source !== TransactionSource.MPESA) {
+    throw createHttpError(400, 'Payment method not yet supported');
+  }
+
+  if (!input.phoneNumber) {
+    throw createHttpError(400, 'phoneNumber must be a valid Kenyan phone number');
   }
 
   const space = await prisma.space.findUnique({
     where: {
-      id: spaceId,
+      id: input.spaceId,
     },
   });
 
@@ -988,23 +996,27 @@ export const createDeposit = async (
     throw createHttpError(404, 'Group not found');
   }
 
-  const reference = options?.reference?.trim() || createId('deposit_ref');
-  const transactionStatus = userId ? TransactionStatus.INITIATED : TransactionStatus.PENDING;
+  const reference = input.reference?.trim() || createId('deposit_ref');
+  const transactionStatus = input.userId
+    ? TransactionStatus.INITIATED
+    : TransactionStatus.PENDING;
+  const normalizedPhoneNumber = normalizeStoredPhoneNumber(
+    input.phoneNumber,
+    'phoneNumber',
+  );
 
   try {
     const transaction = await prisma.transaction.create({
       data: {
-        spaceId,
-        userId,
+        spaceId: input.spaceId,
+        userId: input.userId,
         type: TransactionType.DEPOSIT,
         status: transactionStatus,
-        amount,
+        amount: input.amount,
         reference,
-        source: options?.source ?? TransactionSource.MPESA_STK,
-        phoneNumber: options?.phoneNumber
-          ? normalizeStoredPhoneNumber(options.phoneNumber, 'phoneNumber')
-          : undefined,
-        externalName: options?.externalName,
+        source: input.source,
+        phoneNumber: normalizedPhoneNumber,
+        externalName: input.externalName,
       },
     });
 

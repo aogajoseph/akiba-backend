@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const contracts_1 = require("../../../shared/contracts");
 const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const auth_1 = require("../utils/auth");
@@ -207,13 +206,19 @@ router.post('/:spaceId/deposit', async (req, res, next) => {
         const group = await getGroupById(spaceId);
         await requireMembership(group.id, user.id);
         const body = (0, http_1.getObjectBody)(req.body);
+        const bodySpaceId = (0, http_1.ensureNonEmptyString)(body.spaceId, 'spaceId is required');
         const amount = (0, http_1.ensurePositiveNumber)(body.amount, 'amount must be a positive number');
+        const source = (0, http_1.ensureNonEmptyString)(body.source, 'source is required');
         const phoneNumber = (0, http_1.ensureOptionalNonEmptyString)(body.phoneNumber, 'phoneNumber must be a non-empty string');
-        const externalName = (0, http_1.ensureOptionalNonEmptyString)(body.externalName, 'externalName must be a non-empty string');
-        const deposit = await (0, groupService_1.createDeposit)(spaceId, user.id, amount, {
+        if (bodySpaceId !== spaceId) {
+            throw (0, http_1.createHttpError)(400, 'spaceId does not match route parameter');
+        }
+        const deposit = await (0, groupService_1.createDeposit)({
+            amount,
             phoneNumber,
-            externalName,
-            source: contracts_1.TransactionSource.MPESA_STK,
+            source: source,
+            spaceId,
+            userId: user.id,
         });
         res.json({
             data: {

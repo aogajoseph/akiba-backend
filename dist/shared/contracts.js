@@ -25,6 +25,7 @@ var TransactionStatus;
 })(TransactionStatus || (exports.TransactionStatus = TransactionStatus = {}));
 var TransactionSource;
 (function (TransactionSource) {
+    TransactionSource["MPESA"] = "mpesa";
     TransactionSource["MPESA_PAYBILL"] = "mpesa_paybill";
     TransactionSource["MPESA_STK"] = "mpesa_stk";
     TransactionSource["CARD"] = "card";

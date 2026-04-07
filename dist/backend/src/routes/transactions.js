@@ -56,11 +56,12 @@ const requireMembership = async (groupId, userId) => {
 };
 const parseDepositDto = (body) => {
     return {
+        spaceId: (0, http_1.ensureNonEmptyString)(body.spaceId, 'spaceId is required'),
         amount: (0, http_1.ensurePositiveNumber)(body.amount, 'amount must be a positive number'),
-        currency: (0, http_1.ensureNonEmptyString)(body.currency, 'currency is required'),
-        description: body.description === undefined
+        source: (0, http_1.ensureNonEmptyString)(body.source, 'source is required'),
+        phoneNumber: body.phoneNumber === undefined
             ? undefined
-            : (0, http_1.ensureNonEmptyString)(body.description, 'description must be a non-empty string'),
+            : (0, http_1.ensureNonEmptyString)(body.phoneNumber, 'phoneNumber must be a non-empty string'),
     };
 };
 const parseWithdrawalDto = (body) => {
@@ -94,6 +95,9 @@ router.post('/deposits', async (req, res, next) => {
         await getGroupById(groupId);
         await requireMembership(groupId, user.id);
         const dto = parseDepositDto((0, http_1.getObjectBody)(req.body));
+        if (dto.spaceId !== groupId) {
+            throw (0, http_1.createHttpError)(400, 'spaceId does not match route parameter');
+        }
         const transaction = await (0, transactionService_1.createDeposit)(groupId, user.id, dto);
         const response = {
             data: {
