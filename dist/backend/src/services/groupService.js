@@ -256,6 +256,10 @@ const getSpaceSummary = async (spaceId, filters) => {
     const createdAt = buildCreatedAtFilter(filters);
     const openingBalanceWhere = {
         spaceId,
+        type: {
+            in: [contracts_1.TransactionType.DEPOSIT, contracts_1.TransactionType.WITHDRAWAL],
+        },
+        status: contracts_1.TransactionStatus.COMPLETED,
         ...(filters?.from
             ? {
                 createdAt: {
@@ -272,9 +276,14 @@ const getSpaceSummary = async (spaceId, filters) => {
         filters?.from
             ? prisma_1.prisma.transaction.findMany({
                 where: openingBalanceWhere,
-                orderBy: {
-                    createdAt: 'asc',
-                },
+                orderBy: [
+                    {
+                        createdAt: 'asc',
+                    },
+                    {
+                        id: 'asc',
+                    },
+                ],
             })
             : Promise.resolve([]),
         prisma_1.prisma.transaction.aggregate({
@@ -314,9 +323,14 @@ const getSpaceSummary = async (spaceId, filters) => {
             include: {
                 user: true,
             },
-            orderBy: {
-                createdAt: 'asc',
-            },
+            orderBy: [
+                {
+                    createdAt: 'asc',
+                },
+                {
+                    id: 'asc',
+                },
+            ],
         }),
     ]);
     const totalDeposits = Number(completedDeposits._sum.amount ?? 0);
@@ -325,13 +339,10 @@ const getSpaceSummary = async (spaceId, filters) => {
     const effectiveDeposits = roundCurrency(totalDeposits - totalWithdrawals - pendingWithdrawalAmount);
     const totalFees = calculateServiceFee(effectiveDeposits);
     let runningBalance = openingTransactions.reduce((sum, transaction) => {
-        if (transaction.type === contracts_1.TransactionType.DEPOSIT &&
-            transaction.status === contracts_1.TransactionStatus.COMPLETED) {
+        if (transaction.type === contracts_1.TransactionType.DEPOSIT) {
             return sum + Number(transaction.amount);
         }
-        if (transaction.type === contracts_1.TransactionType.WITHDRAWAL &&
-            transaction.status !== contracts_1.TransactionStatus.FAILED &&
-            transaction.status !== contracts_1.TransactionStatus.REJECTED) {
+        if (transaction.type === contracts_1.TransactionType.WITHDRAWAL) {
             return sum - Number(transaction.amount);
         }
         return sum;

@@ -407,6 +407,10 @@ export const getSpaceSummary = async (
   const createdAt = buildCreatedAtFilter(filters);
   const openingBalanceWhere: Prisma.TransactionWhereInput = {
     spaceId,
+    type: {
+      in: [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL],
+    },
+    status: TransactionStatus.COMPLETED,
     ...(filters?.from
       ? {
           createdAt: {
@@ -430,9 +434,14 @@ export const getSpaceSummary = async (
     filters?.from
       ? prisma.transaction.findMany({
           where: openingBalanceWhere,
-          orderBy: {
-            createdAt: 'asc',
-          },
+          orderBy: [
+            {
+              createdAt: 'asc',
+            },
+            {
+              id: 'asc',
+            },
+          ],
         })
       : Promise.resolve([]),
     prisma.transaction.aggregate({
@@ -472,9 +481,14 @@ export const getSpaceSummary = async (
       include: {
         user: true,
       },
-      orderBy: {
-        createdAt: 'asc',
-      },
+      orderBy: [
+        {
+          createdAt: 'asc',
+        },
+        {
+          id: 'asc',
+        },
+      ],
     }),
   ]);
 
@@ -486,18 +500,11 @@ export const getSpaceSummary = async (
   );
   const totalFees = calculateServiceFee(effectiveDeposits);
   let runningBalance = openingTransactions.reduce((sum, transaction) => {
-    if (
-      transaction.type === TransactionType.DEPOSIT &&
-      transaction.status === TransactionStatus.COMPLETED
-    ) {
+    if (transaction.type === TransactionType.DEPOSIT) {
       return sum + Number(transaction.amount);
     }
 
-    if (
-      transaction.type === TransactionType.WITHDRAWAL &&
-      transaction.status !== TransactionStatus.FAILED &&
-      transaction.status !== TransactionStatus.REJECTED
-    ) {
+    if (transaction.type === TransactionType.WITHDRAWAL) {
       return sum - Number(transaction.amount);
     }
 
