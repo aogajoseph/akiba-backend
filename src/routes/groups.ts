@@ -6,6 +6,7 @@ import {
   CreateGroupResponseDto,
   DeleteGroupResponseDto,
   GetGroupResponseDto,
+  GetSpaceSummaryResponseDto,
   GetTransactionsSummaryResponseDto,
   Group,
   JoinGroupResponseDto,
@@ -39,6 +40,7 @@ import {
   createWithdrawal,
   deleteGroup,
   getSpaceFinancialSnapshotBySpaceIds,
+  getSpaceSummary,
   getTransactionsSummary,
   getSpaceMembers,
   joinSpace,
@@ -208,6 +210,28 @@ const ensureOptionalFutureDateString = (value: unknown): string | undefined => {
   return parsedDate.toISOString();
 };
 
+const parseOptionalIsoDateQuery = (
+  value: unknown,
+  fieldName: string,
+): Date | undefined => {
+  const rawValue = ensureOptionalNonEmptyString(
+    value,
+    `${fieldName} must be a non-empty ISO date string`,
+  );
+
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const parsedDate = new Date(rawValue);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw createHttpError(400, `${fieldName} must be a valid ISO date string`);
+  }
+
+  return parsedDate;
+};
+
 const parseOptionalStringField = (
   value: unknown,
   message: string,
@@ -330,6 +354,30 @@ router.get('/:spaceId/transactions/summary', async (req: Request<SpaceParams>, r
 
     const response: ApiResponse<GetTransactionsSummaryResponseDto> = {
       data: await getTransactionsSummary(spaceId),
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:spaceId/summary', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const { spaceId } = req.params;
+    const from = parseOptionalIsoDateQuery(req.query.from, 'from');
+    const to = parseOptionalIsoDateQuery(req.query.to, 'to');
+
+    if (from && to && from > to) {
+      throw createHttpError(400, 'from must be earlier than or equal to to');
+    }
+
+    await getGroupById(spaceId);
+    await requireMembership(spaceId, user.id);
+
+    const response: ApiResponse<GetSpaceSummaryResponseDto> = {
+      data: await getSpaceSummary(spaceId, { from, to }),
     };
 
     res.json(response);

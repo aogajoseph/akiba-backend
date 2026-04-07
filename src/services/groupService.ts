@@ -1,5 +1,6 @@
 import {
   CreateGroupRequestDto,
+  GetSpaceSummaryResponseDto,
   Group,
   GroupMember,
   GroupRole,
@@ -27,7 +28,7 @@ const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
   'tertiary',
 ];
 const PROMOTABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = ['secondary', 'tertiary'];
-const WITHDRAWAL_FEE_RATE = 0.02;
+const SERVICE_FEE_RATE = 0.025;
 
 const getMpesaPaybillNumber = (): string => {
   return process.env.MPESA_PAYBILL?.trim() || '522522';
@@ -152,6 +153,7 @@ const mapDbTransactionToContractTransaction = (transaction: {
     createdAt: transaction.createdAt.toISOString(),
     currency: 'KES',
     description: transaction.description ?? undefined,
+    reason: transaction.description ?? undefined,
     destination: transaction.destination ?? undefined,
   };
 };
@@ -176,8 +178,12 @@ const roundCurrency = (value: number): number => {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 };
 
+const calculateServiceFee = (amount: number): number => {
+  return Number((amount * SERVICE_FEE_RATE).toFixed(2));
+};
+
 const calculateWithdrawalFee = (amount: number): number => {
-  return roundCurrency(amount * WITHDRAWAL_FEE_RATE);
+  return roundCurrency(amount * SERVICE_FEE_RATE);
 };
 
 const getSpaceApprovalThreshold = (space: { approvalThreshold: number | null }): number => {
@@ -331,14 +337,17 @@ export const getSpaceFinancialSnapshotBySpaceIds = async (
 
   return uniqueSpaceIds.reduce((snapshotMap, spaceId) => {
     const totalBalance = depositsBySpaceId.get(spaceId) ?? 0;
-    const totalFees = roundCurrency(totalBalance * 0.025);
     const pendingWithdrawalAmount = pendingWithdrawalsBySpaceId.get(spaceId) ?? 0;
     const completedWithdrawalAmount = completedWithdrawalsBySpaceId.get(spaceId) ?? 0;
+    const effectiveDeposits = roundCurrency(
+      totalBalance - completedWithdrawalAmount - pendingWithdrawalAmount,
+    );
+    const totalFees = calculateServiceFee(effectiveDeposits);
     const reservedAmount = roundCurrency(
       pendingWithdrawalAmount + completedWithdrawalAmount,
     );
     const availableBalance = roundCurrency(
-      totalBalance - totalFees - pendingWithdrawalAmount - completedWithdrawalAmount,
+      effectiveDeposits - totalFees,
     );
 
     snapshotMap.set(spaceId, {
@@ -357,6 +366,100 @@ export const getSpaceFinancialSnapshotBySpaceIds = async (
     totalBalance: number;
     totalFees: number;
   }>());
+};
+
+const buildCreatedAtFilter = (filters?: {
+  from?: Date;
+  to?: Date;
+}): Prisma.DateTimeFilter | undefined => {
+  if (!filters?.from && !filters?.to) {
+    return undefined;
+  }
+
+  return {
+    gte: filters?.from,
+    lte: filters?.to,
+  };
+};
+
+export const getSpaceSummary = async (
+  spaceId: string,
+  filters?: {
+    from?: Date;
+    to?: Date;
+  },
+): Promise<GetSpaceSummaryResponseDto> => {
+  await getSpaceOrThrow(spaceId);
+
+  const createdAt = buildCreatedAtFilter(filters);
+  const where: Prisma.TransactionWhereInput = {
+    spaceId,
+    createdAt,
+  };
+
+  const [
+    completedDeposits,
+    completedWithdrawals,
+    pendingWithdrawals,
+    transactions,
+  ] = await Promise.all([
+    prisma.transaction.aggregate({
+      where: {
+        ...where,
+        type: TransactionType.DEPOSIT,
+        status: TransactionStatus.COMPLETED,
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
+    prisma.transaction.aggregate({
+      where: {
+        ...where,
+        type: TransactionType.WITHDRAWAL,
+        status: TransactionStatus.COMPLETED,
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
+    prisma.transaction.aggregate({
+      where: {
+        ...where,
+        type: TransactionType.WITHDRAWAL,
+        status: {
+          in: [TransactionStatus.PENDING_APPROVAL, TransactionStatus.APPROVED],
+        },
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
+    prisma.transaction.findMany({
+      where,
+      orderBy: {
+        createdAt: 'desc',
+      },
+    }),
+  ]);
+
+  const totalDeposits = Number(completedDeposits._sum.amount ?? 0);
+  const totalWithdrawals = Number(completedWithdrawals._sum.amount ?? 0);
+  const pendingWithdrawalAmount = Number(pendingWithdrawals._sum.amount ?? 0);
+  const effectiveDeposits = roundCurrency(
+    totalDeposits - totalWithdrawals - pendingWithdrawalAmount,
+  );
+  const totalFees = calculateServiceFee(effectiveDeposits);
+
+  return {
+    summary: {
+      totalDeposits,
+      totalWithdrawals,
+      totalFees,
+      netBalance: roundCurrency(effectiveDeposits - totalFees),
+    },
+    transactions: transactions.map(mapDbTransactionToContractTransaction),
+  };
 };
 
 export const getCompletedBalanceForSpace = async (spaceId: string): Promise<number> => {
@@ -1096,9 +1199,8 @@ export const createWithdrawal = async (
   }
 
   const availableBalance = await getAvailableBalanceForSpace(spaceId);
-  const feeAmount = calculateWithdrawalFee(amount);
 
-  if (amount + feeAmount > availableBalance) {
+  if (amount > availableBalance) {
     throw createHttpError(409, 'Insufficient funds in this space');
   }
 

@@ -26,6 +26,7 @@ const mapDbTransactionToContractTransaction = (transaction) => {
         createdAt: transaction.createdAt.toISOString(),
         currency: 'KES',
         description: transaction.description ?? undefined,
+        reason: transaction.description ?? undefined,
         destination: transaction.destination ?? undefined,
     };
 };

@@ -106,6 +106,17 @@ const ensureOptionalFutureDateString = (value) => {
     }
     return parsedDate.toISOString();
 };
+const parseOptionalIsoDateQuery = (value, fieldName) => {
+    const rawValue = (0, http_1.ensureOptionalNonEmptyString)(value, `${fieldName} must be a non-empty ISO date string`);
+    if (!rawValue) {
+        return undefined;
+    }
+    const parsedDate = new Date(rawValue);
+    if (Number.isNaN(parsedDate.getTime())) {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be a valid ISO date string`);
+    }
+    return parsedDate;
+};
 const parseOptionalStringField = (value, message) => {
     if (value === undefined || value === null) {
         return { provided: false, value: undefined };
@@ -192,6 +203,26 @@ router.get('/:spaceId/transactions/summary', async (req, res, next) => {
         await requireMembership(group.id, user.id);
         const response = {
             data: await (0, groupService_1.getTransactionsSummary)(spaceId),
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/:spaceId/summary', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const { spaceId } = req.params;
+        const from = parseOptionalIsoDateQuery(req.query.from, 'from');
+        const to = parseOptionalIsoDateQuery(req.query.to, 'to');
+        if (from && to && from > to) {
+            throw (0, http_1.createHttpError)(400, 'from must be earlier than or equal to to');
+        }
+        await getGroupById(spaceId);
+        await requireMembership(spaceId, user.id);
+        const response = {
+            data: await (0, groupService_1.getSpaceSummary)(spaceId, { from, to }),
         };
         res.json(response);
     }
