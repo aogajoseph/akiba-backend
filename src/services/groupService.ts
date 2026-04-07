@@ -456,6 +456,7 @@ export const getSpaceSummary = async (
       totalDeposits,
       totalWithdrawals,
       totalFees,
+      availableBalance: roundCurrency(effectiveDeposits - totalFees),
       netBalance: roundCurrency(effectiveDeposits - totalFees),
     },
     transactions: transactions.map(mapDbTransactionToContractTransaction),
