@@ -26,12 +26,20 @@ const mapDbTransactionToContractTransaction = (transaction: {
   spaceId: string;
   status: TransactionStatus | string;
   type: TransactionType | string;
+  user?: {
+    name: string | null;
+  } | null;
   userId: string | null;
 }): Transaction => {
   const amount =
     typeof transaction.amount === 'number'
       ? transaction.amount
       : Number(transaction.amount);
+  const initiatorName =
+    transaction.user?.name?.trim() ||
+    transaction.externalName?.trim() ||
+    transaction.phoneNumber ||
+    'External';
 
   return {
     id: transaction.id,
@@ -45,6 +53,7 @@ const mapDbTransactionToContractTransaction = (transaction: {
     source: transaction.source as TransactionSource,
     phoneNumber: transaction.phoneNumber ?? undefined,
     externalName: transaction.externalName ?? undefined,
+    initiatorName,
     recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
     recipientName: transaction.recipientName ?? undefined,
     status: transaction.status as TransactionStatus,

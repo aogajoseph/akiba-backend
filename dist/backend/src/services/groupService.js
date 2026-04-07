@@ -66,6 +66,11 @@ const mapDbTransactionToContractTransaction = (transaction) => {
     const amount = typeof transaction.amount === 'number'
         ? transaction.amount
         : Number(transaction.amount);
+    const initiatorName = transaction.initiatorName?.trim() ||
+        transaction.user?.name?.trim() ||
+        transaction.externalName?.trim() ||
+        transaction.phoneNumber ||
+        'External';
     return {
         id: transaction.id,
         spaceId: transaction.spaceId,
@@ -78,6 +83,8 @@ const mapDbTransactionToContractTransaction = (transaction) => {
         source: transaction.source,
         phoneNumber: transaction.phoneNumber ?? undefined,
         externalName: transaction.externalName ?? undefined,
+        initiatorName,
+        runningBalance: transaction.runningBalance,
         recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
         recipientName: transaction.recipientName ?? undefined,
         status: transaction.status,
@@ -247,11 +254,29 @@ const buildCreatedAtFilter = (filters) => {
 const getSpaceSummary = async (spaceId, filters) => {
     await getSpaceOrThrow(spaceId);
     const createdAt = buildCreatedAtFilter(filters);
+    const openingBalanceWhere = {
+        spaceId,
+        ...(filters?.from
+            ? {
+                createdAt: {
+                    lt: filters.from,
+                },
+            }
+            : {}),
+    };
     const where = {
         spaceId,
         createdAt,
     };
-    const [completedDeposits, completedWithdrawals, pendingWithdrawals, transactions,] = await Promise.all([
+    const [openingTransactions, completedDeposits, completedWithdrawals, pendingWithdrawals, transactions,] = await Promise.all([
+        filters?.from
+            ? prisma_1.prisma.transaction.findMany({
+                where: openingBalanceWhere,
+                orderBy: {
+                    createdAt: 'asc',
+                },
+            })
+            : Promise.resolve([]),
         prisma_1.prisma.transaction.aggregate({
             where: {
                 ...where,
@@ -286,8 +311,11 @@ const getSpaceSummary = async (spaceId, filters) => {
         }),
         prisma_1.prisma.transaction.findMany({
             where,
+            include: {
+                user: true,
+            },
             orderBy: {
-                createdAt: 'desc',
+                createdAt: 'asc',
             },
         }),
     ]);
@@ -296,6 +324,38 @@ const getSpaceSummary = async (spaceId, filters) => {
     const pendingWithdrawalAmount = Number(pendingWithdrawals._sum.amount ?? 0);
     const effectiveDeposits = roundCurrency(totalDeposits - totalWithdrawals - pendingWithdrawalAmount);
     const totalFees = calculateServiceFee(effectiveDeposits);
+    let runningBalance = openingTransactions.reduce((sum, transaction) => {
+        if (transaction.type === contracts_1.TransactionType.DEPOSIT &&
+            transaction.status === contracts_1.TransactionStatus.COMPLETED) {
+            return sum + Number(transaction.amount);
+        }
+        if (transaction.type === contracts_1.TransactionType.WITHDRAWAL &&
+            transaction.status !== contracts_1.TransactionStatus.FAILED &&
+            transaction.status !== contracts_1.TransactionStatus.REJECTED) {
+            return sum - Number(transaction.amount);
+        }
+        return sum;
+    }, 0);
+    const enrichedTransactions = transactions.map((transaction) => {
+        const amount = Number(transaction.amount);
+        if (transaction.type === contracts_1.TransactionType.DEPOSIT &&
+            transaction.status === contracts_1.TransactionStatus.COMPLETED) {
+            runningBalance += amount;
+        }
+        if (transaction.type === contracts_1.TransactionType.WITHDRAWAL &&
+            transaction.status !== contracts_1.TransactionStatus.FAILED &&
+            transaction.status !== contracts_1.TransactionStatus.REJECTED) {
+            runningBalance -= amount;
+        }
+        const initiatorName = transaction.user?.name?.trim() ||
+            transaction.externalName?.trim() ||
+            (transaction.phoneNumber ? transaction.phoneNumber : 'External');
+        return mapDbTransactionToContractTransaction({
+            ...transaction,
+            initiatorName,
+            runningBalance,
+        });
+    });
     return {
         summary: {
             totalDeposits,
@@ -304,7 +364,7 @@ const getSpaceSummary = async (spaceId, filters) => {
             availableBalance: roundCurrency(effectiveDeposits - totalFees),
             netBalance: roundCurrency(effectiveDeposits - totalFees),
         },
-        transactions: transactions.map(mapDbTransactionToContractTransaction),
+        transactions: enrichedTransactions,
     };
 };
 exports.getSpaceSummary = getSpaceSummary;

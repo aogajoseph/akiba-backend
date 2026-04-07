@@ -128,12 +128,23 @@ const mapDbTransactionToContractTransaction = (transaction: {
   spaceId: string;
   status: TransactionStatus | string;
   type: TransactionType | string;
+  user?: {
+    name: string | null;
+  } | null;
   userId: string | null;
+  initiatorName?: string;
+  runningBalance?: number;
 }): Transaction => {
   const amount =
     typeof transaction.amount === 'number'
       ? transaction.amount
       : Number(transaction.amount);
+  const initiatorName =
+    transaction.initiatorName?.trim() ||
+    transaction.user?.name?.trim() ||
+    transaction.externalName?.trim() ||
+    transaction.phoneNumber ||
+    'External';
 
   return {
     id: transaction.id,
@@ -147,6 +158,8 @@ const mapDbTransactionToContractTransaction = (transaction: {
     source: transaction.source as TransactionSource,
     phoneNumber: transaction.phoneNumber ?? undefined,
     externalName: transaction.externalName ?? undefined,
+    initiatorName,
+    runningBalance: transaction.runningBalance,
     recipientPhoneNumber: transaction.recipientPhoneNumber ?? undefined,
     recipientName: transaction.recipientName ?? undefined,
     status: transaction.status as TransactionStatus,
@@ -392,17 +405,36 @@ export const getSpaceSummary = async (
   await getSpaceOrThrow(spaceId);
 
   const createdAt = buildCreatedAtFilter(filters);
+  const openingBalanceWhere: Prisma.TransactionWhereInput = {
+    spaceId,
+    ...(filters?.from
+      ? {
+          createdAt: {
+            lt: filters.from,
+          },
+        }
+      : {}),
+  };
   const where: Prisma.TransactionWhereInput = {
     spaceId,
     createdAt,
   };
 
   const [
+    openingTransactions,
     completedDeposits,
     completedWithdrawals,
     pendingWithdrawals,
     transactions,
   ] = await Promise.all([
+    filters?.from
+      ? prisma.transaction.findMany({
+          where: openingBalanceWhere,
+          orderBy: {
+            createdAt: 'asc',
+          },
+        })
+      : Promise.resolve([]),
     prisma.transaction.aggregate({
       where: {
         ...where,
@@ -437,8 +469,11 @@ export const getSpaceSummary = async (
     }),
     prisma.transaction.findMany({
       where,
+      include: {
+        user: true,
+      },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: 'asc',
       },
     }),
   ]);
@@ -450,6 +485,54 @@ export const getSpaceSummary = async (
     totalDeposits - totalWithdrawals - pendingWithdrawalAmount,
   );
   const totalFees = calculateServiceFee(effectiveDeposits);
+  let runningBalance = openingTransactions.reduce((sum, transaction) => {
+    if (
+      transaction.type === TransactionType.DEPOSIT &&
+      transaction.status === TransactionStatus.COMPLETED
+    ) {
+      return sum + Number(transaction.amount);
+    }
+
+    if (
+      transaction.type === TransactionType.WITHDRAWAL &&
+      transaction.status !== TransactionStatus.FAILED &&
+      transaction.status !== TransactionStatus.REJECTED
+    ) {
+      return sum - Number(transaction.amount);
+    }
+
+    return sum;
+  }, 0);
+
+  const enrichedTransactions = transactions.map((transaction) => {
+    const amount = Number(transaction.amount);
+
+    if (
+      transaction.type === TransactionType.DEPOSIT &&
+      transaction.status === TransactionStatus.COMPLETED
+    ) {
+      runningBalance += amount;
+    }
+
+    if (
+      transaction.type === TransactionType.WITHDRAWAL &&
+      transaction.status !== TransactionStatus.FAILED &&
+      transaction.status !== TransactionStatus.REJECTED
+    ) {
+      runningBalance -= amount;
+    }
+
+    const initiatorName =
+      transaction.user?.name?.trim() ||
+      transaction.externalName?.trim() ||
+      (transaction.phoneNumber ? transaction.phoneNumber : 'External');
+
+    return mapDbTransactionToContractTransaction({
+      ...transaction,
+      initiatorName,
+      runningBalance,
+    });
+  });
 
   return {
     summary: {
@@ -459,7 +542,7 @@ export const getSpaceSummary = async (
       availableBalance: roundCurrency(effectiveDeposits - totalFees),
       netBalance: roundCurrency(effectiveDeposits - totalFees),
     },
-    transactions: transactions.map(mapDbTransactionToContractTransaction),
+    transactions: enrichedTransactions,
   };
 };
 
