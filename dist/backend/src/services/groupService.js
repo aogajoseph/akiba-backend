@@ -794,6 +794,55 @@ const getSignatoryReport = async (groupId, requesterUserId) => {
 exports.getSignatoryReport = getSignatoryReport;
 const processMpesaWebhookPayment = async (input) => {
     const { accountNumber, amount, externalName, phoneNumber, reference, source = contracts_1.TransactionSource.MPESA_PAYBILL, } = input;
+    const normalizedPhoneNumber = normalizeStoredPhoneNumber(phoneNumber, 'phoneNumber');
+    const ALLOWED_COMPLETION_STATUSES = [
+        contracts_1.TransactionStatus.INITIATED,
+        contracts_1.TransactionStatus.PENDING,
+    ];
+    const existingTransaction = await prisma_1.prisma.transaction.findUnique({
+        where: {
+            reference,
+        },
+        include: {
+            space: true,
+        },
+    });
+    if (existingTransaction) {
+        if (existingTransaction.type !== contracts_1.TransactionType.DEPOSIT) {
+            throw (0, http_1.createHttpError)(409, 'Reference already belongs to a different transaction type');
+        }
+        if (Number(existingTransaction.amount) !== amount) {
+            throw (0, http_1.createHttpError)(409, 'Webhook amount does not match the existing deposit');
+        }
+        if (existingTransaction.status === contracts_1.TransactionStatus.COMPLETED) {
+            return {
+                deposit: mapDbTransactionToContractTransaction(existingTransaction),
+                duplicate: true,
+                group: mapDbSpaceToGroup(existingTransaction.space),
+            };
+        }
+        if (!ALLOWED_COMPLETION_STATUSES.includes(existingTransaction.status)) {
+            throw (0, http_1.createHttpError)(409, `Cannot complete deposit from status ${existingTransaction.status}`);
+        }
+        const completedTransaction = await prisma_1.prisma.transaction.update({
+            where: {
+                id: existingTransaction.id,
+            },
+            data: {
+                status: contracts_1.TransactionStatus.COMPLETED,
+                phoneNumber: normalizedPhoneNumber,
+                externalName: externalName?.trim() || undefined,
+            },
+            include: {
+                space: true,
+            },
+        });
+        return {
+            deposit: mapDbTransactionToContractTransaction(completedTransaction),
+            duplicate: false,
+            group: mapDbSpaceToGroup(completedTransaction.space),
+        };
+    }
     const space = await prisma_1.prisma.space.findUnique({
         where: {
             accountNumber,
@@ -801,19 +850,6 @@ const processMpesaWebhookPayment = async (input) => {
     });
     if (!space) {
         throw (0, http_1.createHttpError)(404, 'Space not found for this account number');
-    }
-    const normalizedPhoneNumber = normalizeStoredPhoneNumber(phoneNumber, 'phoneNumber');
-    const existingTransaction = await prisma_1.prisma.transaction.findUnique({
-        where: {
-            reference,
-        },
-    });
-    if (existingTransaction) {
-        return {
-            deposit: mapDbTransactionToContractTransaction(existingTransaction),
-            duplicate: true,
-            group: mapDbSpaceToGroup(space),
-        };
     }
     try {
         const createdTransaction = await prisma_1.prisma.transaction.create({
@@ -826,7 +862,7 @@ const processMpesaWebhookPayment = async (input) => {
                 reference,
                 source,
                 phoneNumber: normalizedPhoneNumber,
-                externalName,
+                externalName: externalName?.trim() || undefined,
             },
         });
         return {
