@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markNotificationAsRead = exports.getUserNotifications = void 0;
 const prisma_1 = require("../lib/prisma");
+const http_1 = require("../utils/http");
 const getUserNotifications = async ({ userId, cursor, limit = 20, }) => {
     const notifications = await prisma_1.prisma.notificationRecipient.findMany({
         where: {
@@ -26,6 +27,7 @@ const getUserNotifications = async ({ userId, cursor, limit = 20, }) => {
     return {
         notifications: items.map((item) => ({
             id: item.notification.id,
+            cursorId: item.id,
             type: item.notification.type,
             title: item.notification.title,
             body: item.notification.body,
@@ -39,7 +41,7 @@ const getUserNotifications = async ({ userId, cursor, limit = 20, }) => {
 };
 exports.getUserNotifications = getUserNotifications;
 const markNotificationAsRead = async ({ userId, notificationId, }) => {
-    await prisma_1.prisma.notificationRecipient.updateMany({
+    const result = await prisma_1.prisma.notificationRecipient.updateMany({
         where: {
             userId,
             notificationId,
@@ -49,6 +51,9 @@ const markNotificationAsRead = async ({ userId, notificationId, }) => {
             readAt: new Date(),
         },
     });
+    if (result.count === 0) {
+        throw (0, http_1.createHttpError)(404, 'Notification not found');
+    }
     return { success: true };
 };
 exports.markNotificationAsRead = markNotificationAsRead;

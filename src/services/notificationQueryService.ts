@@ -1,5 +1,6 @@
 import { NotificationDTO } from '../../../shared/contracts';
 import { prisma } from '../lib/prisma';
+import { createHttpError } from '../utils/http';
 
 export const getUserNotifications = async ({
   userId,
@@ -35,6 +36,7 @@ export const getUserNotifications = async ({
   return {
     notifications: items.map((item) => ({
       id: item.notification.id,
+      cursorId: item.id,
       type: item.notification.type,
       title: item.notification.title,
       body: item.notification.body,
@@ -54,7 +56,7 @@ export const markNotificationAsRead = async ({
   userId: string;
   notificationId: string;
 }) => {
-  await prisma.notificationRecipient.updateMany({
+  const result = await prisma.notificationRecipient.updateMany({
     where: {
       userId,
       notificationId,
@@ -64,6 +66,10 @@ export const markNotificationAsRead = async ({
       readAt: new Date(),
     },
   });
+
+  if (result.count === 0) {
+    throw createHttpError(404, 'Notification not found');
+  }
 
   return { success: true as const };
 };
