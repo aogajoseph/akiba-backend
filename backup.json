@@ -1,0 +1,160 @@
+{
+  "users": [
+    {
+      "id": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "name": "Jose",
+      "phone": "0725406004",
+      "email": null,
+      "createdAt": "2026-04-03T20:55:03.292Z"
+    }
+  ],
+  "spaces": [
+    {
+      "id": "10ed3ccf-bd68-4037-acf8-88bdd9a19bd3",
+      "name": "Angie's Birthday",
+      "description": "Join us in celebrating our daughter's second birthday to be held at our home in Nairobi on 23rd August 2026.",
+      "imageUrl": "file:///data/user/0/host.exp.exponent/cache/ImagePicker/f302bf4e-a3cd-4ca9-9544-949f23e173d2.jpeg",
+      "targetAmount": 150000,
+      "deadline": "2026-08-15T14:11:00.000Z",
+      "paybillNumber": "522522",
+      "accountNumber": "AKB_1775225466188",
+      "approvalThreshold": 1,
+      "createdAt": "2026-04-03T14:11:11.694Z",
+      "createdById": "user_1775225373574_7cwc10"
+    },
+    {
+      "id": "632ff8dd-8b29-480e-8d09-1c8db5783fdb",
+      "name": "Angie's Birthday",
+      "description": "Join us in celebrating our daughter's second birthday to be held at our home in Nairobi on 23rd August 2026.",
+      "imageUrl": "file:///data/user/0/host.exp.exponent/cache/ImagePicker/297bea8f-a7d1-47a3-be7c-86c383df054d.jpeg",
+      "targetAmount": 150000,
+      "deadline": "2026-08-15T14:43:00.000Z",
+      "paybillNumber": "522522",
+      "accountNumber": "AKB_1775227402256",
+      "approvalThreshold": 1,
+      "createdAt": "2026-04-03T14:43:23.405Z",
+      "createdById": "user_1775227340584_xsulwl"
+    },
+    {
+      "id": "be451b6a-dd69-453b-8269-92f7c787f8ea",
+      "name": "Angie's Birthday",
+      "description": "Join us in celebrating our daughter's second birthday to be held at our home in Nairobi on 23rd August 2026.",
+      "imageUrl": "file:///data/user/0/host.exp.exponent/cache/ImagePicker/4a456048-14ef-4e6e-bb87-743612bcaa07.jpeg",
+      "targetAmount": 150000,
+      "deadline": "2026-08-14T21:00:00.000Z",
+      "paybillNumber": "522522",
+      "accountNumber": "AKB_1775250021514",
+      "approvalThreshold": 1,
+      "createdAt": "2026-04-03T21:00:21.520Z",
+      "createdById": "87255aa6-24ce-4d0a-9f43-28d454a7f264"
+    },
+    {
+      "id": "f931773c-483b-44bb-9c59-9fe925bda0d9",
+      "name": "Jose's Qatar Trip",
+      "description": "We are coming together to support our brother Jose who is planning to travel to Qatar to try and get a job to take care of his family.",
+      "imageUrl": "file:///data/user/0/host.exp.exponent/cache/ImagePicker/a80b8085-1432-464a-8f37-d999a0eebfdf.jpeg",
+      "targetAmount": 300000,
+      "deadline": "2026-10-22T21:56:00.000Z",
+      "paybillNumber": "522522",
+      "accountNumber": "AKB_1775253359681",
+      "approvalThreshold": 1,
+      "createdAt": "2026-04-03T21:55:59.712Z",
+      "createdById": "87255aa6-24ce-4d0a-9f43-28d454a7f264"
+    },
+    {
+      "id": "96c46832-96e8-4fe7-8cca-9ca3b146ff2a",
+      "name": "Akiba Ltd.",
+      "description": "This space was created by Akiba Ltd. employees to save money as a team for shared goals.",
+      "imageUrl": "blob:http://localhost:8081/ceb82671-53aa-4ce6-923f-bd2c162373ef",
+      "targetAmount": 10000000,
+      "deadline": null,
+      "paybillNumber": "522522",
+      "accountNumber": "AKB_1775287258880",
+      "approvalThreshold": 1,
+      "createdAt": "2026-04-04T07:20:58.934Z",
+      "createdById": "87255aa6-24ce-4d0a-9f43-28d454a7f264"
+    },
+    {
+      "id": "e8cc6f0f-1fd8-4a19-83d7-fcec46aa5fe0",
+      "name": "Don's Graduation",
+      "description": "Join us in raising funds for our son's graduation ceremony at Hillcrest University, Nairobi Campus, scheduled for December this year.",
+      "imageUrl": "blob:http://localhost:8081/6cd45799-a6b5-4a6c-9061-58a35aa0f7dd",
+      "targetAmount": 2000000,
+      "deadline": null,
+      "paybillNumber": "522522",
+      "accountNumber": "AKB_1775288769118",
+      "approvalThreshold": 1,
+      "createdAt": "2026-04-04T07:46:09.136Z",
+      "createdById": "87255aa6-24ce-4d0a-9f43-28d454a7f264"
+    }
+  ],
+  "spaceMembers": [
+    {
+      "id": "eea9ac2c-bd2d-4013-a7c7-f0e38f840431",
+      "spaceId": "be451b6a-dd69-453b-8269-92f7c787f8ea",
+      "userId": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "role": "admin",
+      "createdAt": "2026-04-03T21:00:21.916Z"
+    },
+    {
+      "id": "1d512097-23c7-49a3-9d07-30cbe5b17975",
+      "spaceId": "f931773c-483b-44bb-9c59-9fe925bda0d9",
+      "userId": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "role": "admin",
+      "createdAt": "2026-04-03T21:56:02.403Z"
+    },
+    {
+      "id": "f2a087e0-86d9-472e-8ec9-67a324fe2714",
+      "spaceId": "96c46832-96e8-4fe7-8cca-9ca3b146ff2a",
+      "userId": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "role": "admin",
+      "createdAt": "2026-04-04T07:20:59.343Z"
+    },
+    {
+      "id": "15d66a1a-748e-4520-9100-2e564a3f4e74",
+      "spaceId": "e8cc6f0f-1fd8-4a19-83d7-fcec46aa5fe0",
+      "userId": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "role": "admin",
+      "createdAt": "2026-04-04T07:46:09.718Z"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "d519bfb9-1f76-4842-8edb-47008bc6875c",
+      "spaceId": "be451b6a-dd69-453b-8269-92f7c787f8ea",
+      "userId": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "type": "deposit",
+      "status": "initiated",
+      "amount": "1000",
+      "reference": "deposit_ref_1775313384078_3nb2ye",
+      "source": "mpesa_stk",
+      "phoneNumber": null,
+      "externalName": null,
+      "recipientPhoneNumber": null,
+      "recipientName": null,
+      "description": null,
+      "destination": null,
+      "createdAt": "2026-04-04T14:36:24.088Z"
+    },
+    {
+      "id": "94084ae9-7f41-43c5-b9ac-6e506d8f036d",
+      "spaceId": "f931773c-483b-44bb-9c59-9fe925bda0d9",
+      "userId": "87255aa6-24ce-4d0a-9f43-28d454a7f264",
+      "type": "deposit",
+      "status": "initiated",
+      "amount": "20000",
+      "reference": "deposit_ref_1775580579921_9vgr81",
+      "source": "mpesa",
+      "phoneNumber": "+254725406004",
+      "externalName": null,
+      "recipientPhoneNumber": null,
+      "recipientName": null,
+      "description": null,
+      "destination": null,
+      "createdAt": "2026-04-07T16:49:40.209Z"
+    }
+  ],
+  "approvals": [],
+  "notifications": [],
+  "recipients": []
+}

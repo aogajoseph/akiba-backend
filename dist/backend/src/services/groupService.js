@@ -1024,6 +1024,19 @@ const createWithdrawal = async (spaceId, userId, amount, details) => {
             recipientName: details.recipientName.trim(),
         },
     });
+    await (0, notificationService_1.emitNotification)({
+        type: client_1.NotificationType.withdrawal_requested,
+        spaceId: withdrawal.spaceId,
+        transactionId: withdrawal.id,
+        actorId: userId,
+        eventKey: `withdrawal:${withdrawal.id}:requested`,
+        title: 'Withdrawal requested',
+        body: `KES ${amount} withdrawal requested`,
+        metadata: {
+            amount,
+            currency: 'KES',
+        },
+    });
     return mapDbTransactionToContractTransaction(withdrawal);
 };
 exports.createWithdrawal = createWithdrawal;
@@ -1051,8 +1064,8 @@ const approveWithdrawal = async (withdrawalId, userId) => {
         throw (0, http_1.createHttpError)(403, 'Creator cannot approve their own withdrawal');
     }
     try {
-        const updatedWithdrawal = await prisma_1.prisma.$transaction(async (tx) => {
-            await tx.withdrawalApproval.create({
+        const result = await prisma_1.prisma.$transaction(async (tx) => {
+            const approval = await tx.withdrawalApproval.create({
                 data: {
                     transactionId: withdrawal.id,
                     adminId: userId,
@@ -1068,7 +1081,7 @@ const approveWithdrawal = async (withdrawalId, userId) => {
             const nextStatus = approvedCount >= getSpaceApprovalThreshold(withdrawal.space)
                 ? contracts_1.TransactionStatus.APPROVED
                 : contracts_1.TransactionStatus.PENDING_APPROVAL;
-            return tx.transaction.update({
+            const updatedWithdrawal = await tx.transaction.update({
                 where: {
                     id: withdrawal.id,
                 },
@@ -1076,8 +1089,25 @@ const approveWithdrawal = async (withdrawalId, userId) => {
                     status: nextStatus,
                 },
             });
+            return {
+                approval,
+                updatedWithdrawal,
+            };
         });
-        return mapDbTransactionToContractTransaction(updatedWithdrawal);
+        await (0, notificationService_1.emitNotification)({
+            type: client_1.NotificationType.withdrawal_approved,
+            spaceId: result.updatedWithdrawal.spaceId,
+            transactionId: result.updatedWithdrawal.id,
+            actorId: userId,
+            eventKey: `withdrawal:${result.updatedWithdrawal.id}:approved:${result.approval.id}`,
+            title: 'Withdrawal approved',
+            body: `KES ${Number(result.updatedWithdrawal.amount)} approved`,
+            metadata: {
+                amount: Number(result.updatedWithdrawal.amount),
+                currency: 'KES',
+            },
+        });
+        return mapDbTransactionToContractTransaction(result.updatedWithdrawal);
     }
     catch (error) {
         if (isUniqueConstraintError(error)) {
@@ -1104,15 +1134,15 @@ const rejectWithdrawal = async (transactionId, userId) => {
     }
     await requireSpaceAdmin(withdrawal.spaceId, userId);
     try {
-        const rejectedWithdrawal = await prisma_1.prisma.$transaction(async (tx) => {
-            await tx.withdrawalApproval.create({
+        const result = await prisma_1.prisma.$transaction(async (tx) => {
+            const approval = await tx.withdrawalApproval.create({
                 data: {
                     transactionId,
                     adminId: userId,
                     status: 'rejected',
                 },
             });
-            return tx.transaction.update({
+            const rejectedWithdrawal = await tx.transaction.update({
                 where: {
                     id: transactionId,
                 },
@@ -1120,8 +1150,25 @@ const rejectWithdrawal = async (transactionId, userId) => {
                     status: contracts_1.TransactionStatus.REJECTED,
                 },
             });
+            return {
+                approval,
+                rejectedWithdrawal,
+            };
         });
-        return mapDbTransactionToContractTransaction(rejectedWithdrawal);
+        await (0, notificationService_1.emitNotification)({
+            type: client_1.NotificationType.withdrawal_rejected,
+            spaceId: result.rejectedWithdrawal.spaceId,
+            transactionId: result.rejectedWithdrawal.id,
+            actorId: userId,
+            eventKey: `withdrawal:${result.rejectedWithdrawal.id}:rejected:${result.approval.id}`,
+            title: 'Withdrawal rejected',
+            body: `KES ${Number(result.rejectedWithdrawal.amount)} rejected`,
+            metadata: {
+                amount: Number(result.rejectedWithdrawal.amount),
+                currency: 'KES',
+            },
+        });
+        return mapDbTransactionToContractTransaction(result.rejectedWithdrawal);
     }
     catch (error) {
         if (isUniqueConstraintError(error)) {
@@ -1162,6 +1209,7 @@ const executeWithdrawal = async (transactionId, executorUserId) => {
         });
         if (withdrawal.status === contracts_1.TransactionStatus.COMPLETED) {
             return {
+                didComplete: false,
                 fee: existingFee,
                 withdrawal,
             };
@@ -1246,10 +1294,26 @@ const executeWithdrawal = async (transactionId, executorUserId) => {
             },
         });
         return {
+            didComplete: true,
             fee: feeTransaction,
             withdrawal: completedWithdrawal,
         };
     });
+    if (result.didComplete) {
+        await (0, notificationService_1.emitNotification)({
+            type: client_1.NotificationType.withdrawal_completed,
+            spaceId: result.withdrawal.spaceId,
+            transactionId: result.withdrawal.id,
+            actorId: null,
+            eventKey: `withdrawal:${result.withdrawal.id}:completed`,
+            title: 'Withdrawal completed',
+            body: `KES ${Number(result.withdrawal.amount)} sent successfully`,
+            metadata: {
+                amount: Number(result.withdrawal.amount),
+                currency: 'KES',
+            },
+        });
+    }
     return {
         withdrawal: mapDbTransactionToContractTransaction(result.withdrawal),
         fee: result.fee ? mapDbTransactionToContractTransaction(result.fee) : null,

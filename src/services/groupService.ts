@@ -15,11 +15,12 @@ import {
   UpdateGroupRequestDto,
 } from '../../../shared/contracts';
 import { normalizePhoneNumber } from '../../../shared/phone';
-import type { Prisma } from '@prisma/client';
+import { NotificationType, type Prisma } from '@prisma/client';
 import { approvals, groupMembers, groups, messages, transactions } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
 import { prisma } from '../lib/prisma';
 import { getUsersByIds } from '../utils/auth';
+import { emitNotification } from './notificationService';
 
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
@@ -1141,6 +1142,20 @@ export const processMpesaWebhookPayment = async (
       },
     });
 
+    await emitNotification({
+      type: NotificationType.deposit_completed,
+      spaceId: completedTransaction.spaceId,
+      transactionId: completedTransaction.id,
+      actorId: null,
+      eventKey: `deposit:${completedTransaction.id}:completed`,
+      title: 'Deposit received',
+      body: `KES ${amount} deposited successfully`,
+      metadata: {
+        amount,
+        currency: 'KES',
+      },
+    });
+
     return {
       deposit: mapDbTransactionToContractTransaction(completedTransaction),
       duplicate: false,
@@ -1170,6 +1185,20 @@ export const processMpesaWebhookPayment = async (
         source,
         phoneNumber: normalizedPhoneNumber,
         externalName: externalName?.trim() || undefined,
+      },
+    });
+
+    await emitNotification({
+      type: NotificationType.deposit_completed,
+      spaceId: createdTransaction.spaceId,
+      transactionId: createdTransaction.id,
+      actorId: null,
+      eventKey: `deposit:${createdTransaction.id}:completed`,
+      title: 'Deposit received',
+      body: `KES ${amount} deposited successfully`,
+      metadata: {
+        amount,
+        currency: 'KES',
       },
     });
 
@@ -1354,6 +1383,20 @@ export const createWithdrawal = async (
     },
   });
 
+  await emitNotification({
+    type: NotificationType.withdrawal_requested,
+    spaceId: withdrawal.spaceId,
+    transactionId: withdrawal.id,
+    actorId: userId,
+    eventKey: `withdrawal:${withdrawal.id}:requested`,
+    title: 'Withdrawal requested',
+    body: `KES ${amount} withdrawal requested`,
+    metadata: {
+      amount,
+      currency: 'KES',
+    },
+  });
+
   return mapDbTransactionToContractTransaction(withdrawal);
 };
 
@@ -1389,8 +1432,8 @@ export const approveWithdrawal = async (
   }
 
   try {
-    const updatedWithdrawal = await prisma.$transaction(async (tx) => {
-      await tx.withdrawalApproval.create({
+    const result = await prisma.$transaction(async (tx) => {
+      const approval = await tx.withdrawalApproval.create({
         data: {
           transactionId: withdrawal.id,
           adminId: userId,
@@ -1410,7 +1453,7 @@ export const approveWithdrawal = async (
           ? TransactionStatus.APPROVED
           : TransactionStatus.PENDING_APPROVAL;
 
-      return tx.transaction.update({
+      const updatedWithdrawal = await tx.transaction.update({
         where: {
           id: withdrawal.id,
         },
@@ -1418,9 +1461,28 @@ export const approveWithdrawal = async (
           status: nextStatus,
         },
       });
+
+      return {
+        approval,
+        updatedWithdrawal,
+      };
     });
 
-    return mapDbTransactionToContractTransaction(updatedWithdrawal);
+    await emitNotification({
+      type: NotificationType.withdrawal_approved,
+      spaceId: result.updatedWithdrawal.spaceId,
+      transactionId: result.updatedWithdrawal.id,
+      actorId: userId,
+      eventKey: `withdrawal:${result.updatedWithdrawal.id}:approved:${result.approval.id}`,
+      title: 'Withdrawal approved',
+      body: `KES ${Number(result.updatedWithdrawal.amount)} approved`,
+      metadata: {
+        amount: Number(result.updatedWithdrawal.amount),
+        currency: 'KES',
+      },
+    });
+
+    return mapDbTransactionToContractTransaction(result.updatedWithdrawal);
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       throw createHttpError(409, 'You have already approved or rejected this withdrawal');
@@ -1455,8 +1517,8 @@ export const rejectWithdrawal = async (
   await requireSpaceAdmin(withdrawal.spaceId, userId);
 
   try {
-    const rejectedWithdrawal = await prisma.$transaction(async (tx) => {
-      await tx.withdrawalApproval.create({
+    const result = await prisma.$transaction(async (tx) => {
+      const approval = await tx.withdrawalApproval.create({
         data: {
           transactionId,
           adminId: userId,
@@ -1464,7 +1526,7 @@ export const rejectWithdrawal = async (
         },
       });
 
-      return tx.transaction.update({
+      const rejectedWithdrawal = await tx.transaction.update({
         where: {
           id: transactionId,
         },
@@ -1472,9 +1534,28 @@ export const rejectWithdrawal = async (
           status: TransactionStatus.REJECTED,
         },
       });
+
+      return {
+        approval,
+        rejectedWithdrawal,
+      };
     });
 
-    return mapDbTransactionToContractTransaction(rejectedWithdrawal);
+    await emitNotification({
+      type: NotificationType.withdrawal_rejected,
+      spaceId: result.rejectedWithdrawal.spaceId,
+      transactionId: result.rejectedWithdrawal.id,
+      actorId: userId,
+      eventKey: `withdrawal:${result.rejectedWithdrawal.id}:rejected:${result.approval.id}`,
+      title: 'Withdrawal rejected',
+      body: `KES ${Number(result.rejectedWithdrawal.amount)} rejected`,
+      metadata: {
+        amount: Number(result.rejectedWithdrawal.amount),
+        currency: 'KES',
+      },
+    });
+
+    return mapDbTransactionToContractTransaction(result.rejectedWithdrawal);
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       throw createHttpError(409, 'You have already approved or rejected this withdrawal');
@@ -1524,6 +1605,7 @@ export const executeWithdrawal = async (
 
     if (withdrawal.status === TransactionStatus.COMPLETED) {
       return {
+        didComplete: false,
         fee: existingFee,
         withdrawal,
       };
@@ -1618,10 +1700,27 @@ export const executeWithdrawal = async (
     });
 
     return {
+      didComplete: true,
       fee: feeTransaction,
       withdrawal: completedWithdrawal,
     };
   });
+
+  if (result.didComplete) {
+    await emitNotification({
+      type: NotificationType.withdrawal_completed,
+      spaceId: result.withdrawal.spaceId,
+      transactionId: result.withdrawal.id,
+      actorId: null,
+      eventKey: `withdrawal:${result.withdrawal.id}:completed`,
+      title: 'Withdrawal completed',
+      body: `KES ${Number(result.withdrawal.amount)} sent successfully`,
+      metadata: {
+        amount: Number(result.withdrawal.amount),
+        currency: 'KES',
+      },
+    });
+  }
 
   return {
     withdrawal: mapDbTransactionToContractTransaction(result.withdrawal),
