@@ -1031,9 +1031,9 @@ const createWithdrawal = async (spaceId, userId, amount, details) => {
         actorId: userId,
         eventKey: `withdrawal:${withdrawal.id}:requested`,
         title: 'Withdrawal requested',
-        body: `KES ${amount} withdrawal requested`,
+        body: `KES ${Number(amount)} withdrawal request submitted`,
         metadata: {
-            amount,
+            amount: Number(amount),
             currency: 'KES',
         },
     });
@@ -1090,21 +1090,31 @@ const approveWithdrawal = async (withdrawalId, userId) => {
                 },
             });
             return {
+                approvalCount: approvedCount,
+                approvalThreshold: getSpaceApprovalThreshold(withdrawal.space),
                 approval,
                 updatedWithdrawal,
             };
         });
+        const isFinalApproval = result.updatedWithdrawal.status === contracts_1.TransactionStatus.APPROVED;
         await (0, notificationService_1.emitNotification)({
             type: client_1.NotificationType.withdrawal_approved,
             spaceId: result.updatedWithdrawal.spaceId,
             transactionId: result.updatedWithdrawal.id,
             actorId: userId,
             eventKey: `withdrawal:${result.updatedWithdrawal.id}:approved:${result.approval.id}`,
-            title: 'Withdrawal approved',
-            body: `KES ${Number(result.updatedWithdrawal.amount)} approved`,
+            title: isFinalApproval
+                ? 'Withdrawal fully approved'
+                : 'Withdrawal approved',
+            body: isFinalApproval
+                ? `KES ${Number(result.updatedWithdrawal.amount)} fully approved and ready for execution`
+                : `KES ${Number(result.updatedWithdrawal.amount)} approval recorded`,
             metadata: {
                 amount: Number(result.updatedWithdrawal.amount),
                 currency: 'KES',
+                approvalCount: result.approvalCount,
+                approvalThreshold: result.approvalThreshold,
+                isFinalApproval,
             },
         });
         return mapDbTransactionToContractTransaction(result.updatedWithdrawal);
