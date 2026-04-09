@@ -13,6 +13,7 @@ const approvals_1 = __importDefault(require("./routes/approvals"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const groups_1 = __importDefault(require("./routes/groups"));
 const messages_1 = __importDefault(require("./routes/messages"));
+const notifications_1 = __importDefault(require("./routes/notifications"));
 const payments_1 = __importDefault(require("./routes/payments"));
 const typing_1 = __importDefault(require("./routes/typing"));
 const transactions_1 = __importDefault(require("./routes/transactions"));
@@ -98,6 +99,7 @@ app.get('/health', (_req, res) => {
 });
 app.use('/auth', auth_1.default);
 app.use('/users', users_1.default);
+app.use('/notifications', notifications_1.default);
 app.use('/payments', payments_1.default);
 app.use('/groups', groups_1.default);
 app.use('/spaces', groups_1.default);
