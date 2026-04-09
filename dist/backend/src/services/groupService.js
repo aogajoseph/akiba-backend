@@ -3,10 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.listWithdrawalApprovals = exports.executeWithdrawal = exports.rejectWithdrawal = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = exports.getCompletedBalanceForSpace = exports.getSpaceSummary = exports.getSpaceFinancialSnapshotBySpaceIds = exports.getCompletedBalancesBySpaceIds = exports.getAvailableBalanceForSpace = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const phone_1 = require("../../../shared/phone");
+const client_1 = require("@prisma/client");
 const store_1 = require("../data/store");
 const http_1 = require("../utils/http");
 const prisma_1 = require("../lib/prisma");
 const auth_1 = require("../utils/auth");
+const notificationService_1 = require("./notificationService");
 const MAX_SIGNATORIES = 3;
 const JOINABLE_SIGNATORY_ROLES = [
     'primary',
@@ -837,6 +839,19 @@ const processMpesaWebhookPayment = async (input) => {
                 space: true,
             },
         });
+        await (0, notificationService_1.emitNotification)({
+            type: client_1.NotificationType.deposit_completed,
+            spaceId: completedTransaction.spaceId,
+            transactionId: completedTransaction.id,
+            actorId: null,
+            eventKey: `deposit:${completedTransaction.id}:completed`,
+            title: 'Deposit received',
+            body: `KES ${amount} deposited successfully`,
+            metadata: {
+                amount,
+                currency: 'KES',
+            },
+        });
         return {
             deposit: mapDbTransactionToContractTransaction(completedTransaction),
             duplicate: false,
@@ -863,6 +878,19 @@ const processMpesaWebhookPayment = async (input) => {
                 source,
                 phoneNumber: normalizedPhoneNumber,
                 externalName: externalName?.trim() || undefined,
+            },
+        });
+        await (0, notificationService_1.emitNotification)({
+            type: client_1.NotificationType.deposit_completed,
+            spaceId: createdTransaction.spaceId,
+            transactionId: createdTransaction.id,
+            actorId: null,
+            eventKey: `deposit:${createdTransaction.id}:completed`,
+            title: 'Deposit received',
+            body: `KES ${amount} deposited successfully`,
+            metadata: {
+                amount,
+                currency: 'KES',
             },
         });
         return {
