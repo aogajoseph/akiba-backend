@@ -14,6 +14,7 @@ import paymentsRouter from './routes/payments';
 import typingRouter from './routes/typing';
 import transactionsRouter from './routes/transactions';
 import usersRouter from './routes/users';
+import { attachNotificationWebSocketServer } from './services/notificationRealtimeService';
 import { errorHandler } from './utils/http';
 
 dotenv.config();
@@ -112,6 +113,8 @@ io.on('connection', (socket) => {
     removeSocketPresence(socket.id);
   });
 });
+
+attachNotificationWebSocketServer(httpServer);
 
 app.use(cors());
 app.use(express.json());

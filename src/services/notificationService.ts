@@ -1,6 +1,7 @@
 import { NotificationType, Prisma } from '@prisma/client';
 
 import { prisma } from '../lib/prisma';
+import { broadcastNotificationCreated } from './notificationRealtimeService';
 
 export const emitNotification = async ({
   type,
@@ -53,6 +54,34 @@ export const emitNotification = async ({
       userId: member.userId,
     })),
     skipDuplicates: true,
+  });
+
+  const recipients = await prisma.notificationRecipient.findMany({
+    where: {
+      notificationId: notification.id,
+    },
+    select: {
+      id: true,
+      userId: true,
+      isRead: true,
+    },
+  });
+
+  recipients.forEach((recipient) => {
+    broadcastNotificationCreated({
+      userId: recipient.userId,
+      notification: {
+        id: notification.id,
+        cursorId: recipient.id,
+        type: notification.type,
+        title,
+        body,
+        createdAt: notification.createdAt.toISOString(),
+        spaceId,
+        transactionId,
+        isRead: recipient.isRead,
+      },
+    });
   });
 
   return notification;
