@@ -11,6 +11,7 @@ const path_1 = __importDefault(require("path"));
 const socket_io_1 = require("socket.io");
 const approvals_1 = __importDefault(require("./routes/approvals"));
 const auth_1 = __importDefault(require("./routes/auth"));
+const devices_1 = __importDefault(require("./routes/devices"));
 const groups_1 = __importDefault(require("./routes/groups"));
 const messages_1 = __importDefault(require("./routes/messages"));
 const notifications_1 = __importDefault(require("./routes/notifications"));
@@ -100,6 +101,7 @@ app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
 });
 app.use('/auth', auth_1.default);
+app.use('/devices', devices_1.default);
 app.use('/users', users_1.default);
 app.use('/notifications', notifications_1.default);
 app.use('/payments', payments_1.default);

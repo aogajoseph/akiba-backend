@@ -2,6 +2,7 @@ import { NotificationType, Prisma } from '@prisma/client';
 
 import { prisma } from '../lib/prisma';
 import { broadcastNotificationCreated } from './notificationRealtimeService';
+import { sendPushToUser } from './pushService';
 
 export const emitNotification = async ({
   type,
@@ -83,6 +84,10 @@ export const emitNotification = async ({
       },
     });
   });
+
+  await Promise.allSettled(
+    recipients.map((recipient) => sendPushToUser(recipient.userId, notification.title, notification.body)),
+  );
 
   return notification;
 };

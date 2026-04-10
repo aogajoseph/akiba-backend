@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 
 import approvalsRouter from './routes/approvals';
 import authRouter from './routes/auth';
+import devicesRouter from './routes/devices';
 import groupsRouter from './routes/groups';
 import messagesRouter from './routes/messages';
 import notificationsRouter from './routes/notifications';
@@ -125,6 +126,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/auth', authRouter);
+app.use('/devices', devicesRouter);
 app.use('/users', usersRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/payments', paymentsRouter);

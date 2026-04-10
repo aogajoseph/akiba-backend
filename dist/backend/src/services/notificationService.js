@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.emitNotification = void 0;
 const prisma_1 = require("../lib/prisma");
 const notificationRealtimeService_1 = require("./notificationRealtimeService");
+const pushService_1 = require("./pushService");
 const emitNotification = async ({ type, spaceId, transactionId, actorId, title, body, metadata, eventKey, }) => {
     const existing = await prisma_1.prisma.notification.findUnique({
         where: { eventKey },
@@ -59,6 +60,7 @@ const emitNotification = async ({ type, spaceId, transactionId, actorId, title, 
             },
         });
     });
+    await Promise.allSettled(recipients.map((recipient) => (0, pushService_1.sendPushToUser)(recipient.userId, notification.title, notification.body)));
     return notification;
 };
 exports.emitNotification = emitNotification;
