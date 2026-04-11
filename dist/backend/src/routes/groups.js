@@ -25,7 +25,7 @@ const mapSpaceToGroup = (space, financials) => {
         collectedAmount: financials?.availableBalance ?? 0,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
-        approvalThreshold: space.approvalThreshold,
+        approvalThreshold: 2,
         totalBalance: financials?.totalBalance,
         totalFees: financials?.totalFees,
         pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
@@ -138,9 +138,6 @@ router.post('/', async (req, res, next) => {
             name: (0, http_1.ensureNonEmptyString)(body.name, 'name is required'),
             description: (0, http_1.ensureOptionalNonEmptyString)(body.description, 'description must be a non-empty string'),
             image: (0, http_1.ensureOptionalNonEmptyString)(body.image, 'image must be a non-empty string'),
-            approvalThreshold: body.approvalThreshold === undefined || body.approvalThreshold === null
-                ? 2
-                : (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer'),
             targetAmount: body.targetAmount === undefined || body.targetAmount === null
                 ? undefined
                 : (0, http_1.ensurePositiveNumber)(body.targetAmount, 'targetAmount must be a positive number'),
@@ -152,7 +149,6 @@ router.post('/', async (req, res, next) => {
             imageUrl: dto.image,
             targetAmount: dto.targetAmount,
             deadline: dto.deadline,
-            approvalThreshold: dto.approvalThreshold,
             createdById: user.id,
         });
         const response = {
@@ -384,9 +380,6 @@ router.patch('/:groupId', async (req, res, next) => {
         }
         if (imageUrlField.provided) {
             dto.imageUrl = imageUrlField.value;
-        }
-        if (body.approvalThreshold !== undefined) {
-            dto.approvalThreshold = (0, http_1.ensurePositiveInteger)(body.approvalThreshold, 'approvalThreshold must be a positive integer');
         }
         if (body.targetAmount !== undefined) {
             dto.targetAmount =

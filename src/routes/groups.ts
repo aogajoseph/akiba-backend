@@ -105,7 +105,7 @@ const mapSpaceToGroup = (space: {
     collectedAmount: financials?.availableBalance ?? 0,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
-    approvalThreshold: space.approvalThreshold,
+    approvalThreshold: 2,
     totalBalance: financials?.totalBalance,
     totalFees: financials?.totalFees,
     pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
@@ -266,13 +266,6 @@ router.post('/', async (req, res, next) => {
         body.image,
         'image must be a non-empty string',
       ),
-      approvalThreshold:
-        body.approvalThreshold === undefined || body.approvalThreshold === null
-          ? 2
-          : ensurePositiveInteger(
-              body.approvalThreshold,
-              'approvalThreshold must be a positive integer',
-            ),
       targetAmount:
         body.targetAmount === undefined || body.targetAmount === null
           ? undefined
@@ -289,7 +282,6 @@ router.post('/', async (req, res, next) => {
       imageUrl: dto.image,
       targetAmount: dto.targetAmount,
       deadline: dto.deadline,
-      approvalThreshold: dto.approvalThreshold,
       createdById: user.id,
     });
 
@@ -571,13 +563,6 @@ router.patch('/:groupId', async (req: Request<GroupParams>, res, next) => {
 
     if (imageUrlField.provided) {
       dto.imageUrl = imageUrlField.value;
-    }
-
-    if (body.approvalThreshold !== undefined) {
-      dto.approvalThreshold = ensurePositiveInteger(
-        body.approvalThreshold,
-        'approvalThreshold must be a positive integer',
-      );
     }
 
     if (body.targetAmount !== undefined) {

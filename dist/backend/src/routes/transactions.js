@@ -31,7 +31,7 @@ const getGroupById = async (groupId) => {
         collectedAmount: 0,
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
-        approvalThreshold: space.approvalThreshold,
+        approvalThreshold: 2,
         createdAt: space.createdAt.toISOString(),
     };
 };

@@ -23,6 +23,8 @@ import { getUsersByIds } from '../utils/auth';
 import { emitNotification } from './notificationService';
 
 const MAX_SIGNATORIES = 3;
+const SYSTEM_APPROVAL_THRESHOLD = 2;
+const MIN_ADMINS_REQUIRED_FOR_WITHDRAWALS = 3;
 const JOINABLE_SIGNATORY_ROLES: Exclude<SignatoryRole, null>[] = [
   'primary',
   'secondary',
@@ -74,7 +76,7 @@ const mapDbSpaceToGroup = (space: {
     collectedAmount,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
-    approvalThreshold: space.approvalThreshold,
+    approvalThreshold: SYSTEM_APPROVAL_THRESHOLD,
     createdAt: space.createdAt.toISOString(),
   };
 };
@@ -201,7 +203,8 @@ const calculateWithdrawalFee = (amount: number): number => {
 };
 
 const getSpaceApprovalThreshold = (space: { approvalThreshold: number | null }): number => {
-  return Math.max(space.approvalThreshold ?? 2, 2);
+  void space;
+  return SYSTEM_APPROVAL_THRESHOLD;
 };
 
 const requireSpaceCreator = (space: { createdById: string }, userId: string): void => {
@@ -761,10 +764,6 @@ export const createGroup = (
   userId: string,
   dto: CreateGroupRequestDto,
 ): { group: Group; member: GroupMember } => {
-  if (dto.approvalThreshold > MAX_SIGNATORIES) {
-    throw createHttpError(400, 'approvalThreshold cannot exceed the maximum signatories (3)');
-  }
-
   const group: Group = {
     id: createId('group'),
     name: dto.name,
@@ -776,7 +775,7 @@ export const createGroup = (
     collectedAmount: dto.targetAmount ? 0 : undefined,
     deadline: dto.deadline,
     createdByUserId: userId,
-    approvalThreshold: dto.approvalThreshold,
+    approvalThreshold: SYSTEM_APPROVAL_THRESHOLD,
     createdAt: new Date().toISOString(),
   };
 
@@ -801,11 +800,8 @@ export const createSpace = async (input: {
   imageUrl?: string;
   targetAmount?: number;
   deadline?: string;
-  approvalThreshold?: number;
   createdById: string;
 }): Promise<{ space: Group }> => {
-  const approvalThreshold = input.approvalThreshold ?? 2;
-  ensureApprovalThresholdInRange(approvalThreshold);
   const accountNumber = `AKB_${Date.now()}`;
 
   try {
@@ -819,7 +815,7 @@ export const createSpace = async (input: {
           deadline: input.deadline ? new Date(input.deadline) : undefined,
           paybillNumber: getMpesaPaybillNumber(),
           accountNumber,
-          approvalThreshold,
+          approvalThreshold: SYSTEM_APPROVAL_THRESHOLD,
           createdById: input.createdById,
         },
       });
@@ -847,7 +843,7 @@ export const createSpace = async (input: {
         collectedAmount: 0,
         deadline: space.deadline ? space.deadline.toISOString() : undefined,
         createdByUserId: space.createdById,
-        approvalThreshold: space.approvalThreshold,
+        approvalThreshold: SYSTEM_APPROVAL_THRESHOLD,
         createdAt: space.createdAt.toISOString(),
       },
     };
@@ -987,20 +983,6 @@ export const updateGroup = async (
   await getSpaceMembershipOrThrow(groupId, actorUserId);
   requireSpaceCreator(space, actorUserId);
 
-  if (dto.approvalThreshold !== undefined) {
-    ensureApprovalThresholdInRange(dto.approvalThreshold);
-    const adminCount = await prisma.spaceMember.count({
-      where: {
-        spaceId: groupId,
-        role: 'admin',
-      },
-    });
-
-    if (dto.approvalThreshold > adminCount) {
-      throw createHttpError(409, 'approvalThreshold cannot exceed the number of admins');
-    }
-  }
-
   const updatedSpace = await prisma.space.update({
     where: {
       id: groupId,
@@ -1011,7 +993,6 @@ export const updateGroup = async (
         ? dto.description ?? null
         : undefined,
       imageUrl: dto.imageUrl,
-      approvalThreshold: dto.approvalThreshold,
       targetAmount: dto.targetAmount,
       deadline: Object.prototype.hasOwnProperty.call(dto, 'deadline')
         ? dto.deadline
@@ -1341,8 +1322,11 @@ export const createWithdrawal = async (
     },
   });
 
-  if (adminCount < 2) {
-    throw createHttpError(409, 'At least 2 admins required before withdrawals');
+  if (adminCount < MIN_ADMINS_REQUIRED_FOR_WITHDRAWALS) {
+    throw createHttpError(
+      409,
+      'To request withdrawals, promote at least 2 members to Admin.',
+    );
   }
 
   const activeWithdrawal = await prisma.transaction.findFirst({

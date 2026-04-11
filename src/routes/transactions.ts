@@ -70,7 +70,7 @@ const getGroupById = async (groupId: string): Promise<Group> => {
     collectedAmount: 0,
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
-    approvalThreshold: space.approvalThreshold,
+    approvalThreshold: 2,
     createdAt: space.createdAt.toISOString(),
   };
 };
