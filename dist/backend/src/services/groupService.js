@@ -43,6 +43,75 @@ const normalizeHostedImageUrl = (value) => {
     }
     return normalizedValue;
 };
+const formatKesAmount = (amount) => {
+    return amount.toLocaleString('en-KE', {
+        maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    });
+};
+const formatReadableDate = (value) => {
+    return new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    }).format(value);
+};
+const resolveActorName = async (userId) => {
+    const usersById = await (0, auth_1.getUsersByIds)([userId]);
+    return usersById.get(userId)?.name?.trim() || 'Someone';
+};
+const buildSpaceUpdateNotification = ({ actorName, previousSpace, updatedSpace, changedFields, }) => {
+    if (changedFields.length !== 1) {
+        return {
+            title: 'Space updated',
+            body: `"${actorName}" updated space details`,
+        };
+    }
+    const [field] = changedFields;
+    switch (field) {
+        case 'name':
+            return {
+                title: 'Space name updated',
+                body: `"${actorName}" renamed the space to "${updatedSpace.name}"`,
+            };
+        case 'image':
+            return {
+                title: 'Space image updated',
+                body: `"${actorName}" updated the space image`,
+            };
+        case 'description':
+            return {
+                title: 'Description updated',
+                body: `"${actorName}" updated the space description`,
+            };
+        case 'targetAmount':
+            return {
+                title: 'Target amount updated',
+                body: `"${actorName}" set target to KES ${formatKesAmount(updatedSpace.targetAmount ?? 0)}`,
+            };
+        case 'deadline':
+            if (updatedSpace.deadline) {
+                return {
+                    title: 'Deadline updated',
+                    body: `"${actorName}" set deadline to ${formatReadableDate(updatedSpace.deadline)}`,
+                };
+            }
+            if (previousSpace.deadline) {
+                return {
+                    title: 'Deadline updated',
+                    body: `"${actorName}" removed the deadline`,
+                };
+            }
+            return {
+                title: 'Deadline updated',
+                body: `"${actorName}" updated the space deadline`,
+            };
+        default:
+            return {
+                title: 'Space updated',
+                body: `"${actorName}" updated space details`,
+            };
+    }
+};
 const mapDbSpaceToGroup = (space, collectedAmount = 0) => {
     return {
         id: space.id,
@@ -777,13 +846,32 @@ const updateGroup = async (groupId, actorUserId, dto) => {
         },
     });
     if (changedFields.length > 0) {
+        const actorName = await resolveActorName(actorUserId);
+        const notificationMessage = buildSpaceUpdateNotification({
+            actorName,
+            previousSpace: {
+                name: space.name,
+                imageUrl: space.imageUrl,
+                description: space.description,
+                targetAmount: space.targetAmount,
+                deadline: space.deadline,
+            },
+            updatedSpace: {
+                name: updatedSpace.name,
+                imageUrl: updatedSpace.imageUrl,
+                description: updatedSpace.description,
+                targetAmount: updatedSpace.targetAmount,
+                deadline: updatedSpace.deadline,
+            },
+            changedFields,
+        });
         await (0, notificationService_1.emitNotification)({
             type: client_1.NotificationType.space_updated,
             spaceId: updatedSpace.id,
             actorId: actorUserId,
             eventKey: `space:${updatedSpace.id}:updated:${Date.now()}`,
-            title: 'Space updated',
-            body: 'Space details were updated',
+            title: notificationMessage.title,
+            body: notificationMessage.body,
             metadata: {
                 updatedFields: changedFields,
             },
@@ -1750,13 +1838,14 @@ const deleteGroup = async (groupId, requesterUserId) => {
             spaceId: groupId,
         };
     });
+    const actorName = await resolveActorName(requesterUserId);
     await (0, notificationService_1.emitNotification)({
         type: client_1.NotificationType.space_deleted,
         spaceId: deletionResult.spaceId,
         actorId: requesterUserId,
         eventKey: `space:${deletionResult.spaceId}:deleted`,
         title: 'Space deleted',
-        body: 'This space has been deleted by the creator',
+        body: `"${actorName}" deleted the space`,
         metadata: {},
         recipientUserIds: deletionResult.memberUserIds,
         excludeActorFromRecipients: true,
