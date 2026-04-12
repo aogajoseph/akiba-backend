@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ApprovalStatus = exports.TransactionSource = exports.TransactionStatus = exports.TransactionType = exports.GroupRole = void 0;
+exports.NotificationType = exports.ApprovalStatus = exports.TransactionSource = exports.TransactionStatus = exports.TransactionType = exports.GroupRole = void 0;
 var GroupRole;
 (function (GroupRole) {
     GroupRole["MEMBER"] = "member";
@@ -37,3 +37,13 @@ var ApprovalStatus;
     ApprovalStatus["APPROVED"] = "approved";
     ApprovalStatus["REJECTED"] = "rejected";
 })(ApprovalStatus || (exports.ApprovalStatus = ApprovalStatus = {}));
+var NotificationType;
+(function (NotificationType) {
+    NotificationType["DEPOSIT_COMPLETED"] = "deposit_completed";
+    NotificationType["WITHDRAWAL_REQUESTED"] = "withdrawal_requested";
+    NotificationType["WITHDRAWAL_APPROVED"] = "withdrawal_approved";
+    NotificationType["WITHDRAWAL_REJECTED"] = "withdrawal_rejected";
+    NotificationType["WITHDRAWAL_COMPLETED"] = "withdrawal_completed";
+    NotificationType["SPACE_UPDATED"] = "space_updated";
+    NotificationType["SPACE_DELETED"] = "space_deleted";
+})(NotificationType || (exports.NotificationType = NotificationType = {}));

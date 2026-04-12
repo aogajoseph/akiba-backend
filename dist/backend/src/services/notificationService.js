@@ -4,7 +4,7 @@ exports.emitNotification = void 0;
 const prisma_1 = require("../lib/prisma");
 const notificationRealtimeService_1 = require("./notificationRealtimeService");
 const pushService_1 = require("./pushService");
-const emitNotification = async ({ type, spaceId, transactionId, actorId, title, body, metadata, eventKey, }) => {
+const emitNotification = async ({ type, spaceId, transactionId, actorId, title, body, metadata, eventKey, recipientUserIds, excludeActorFromRecipients = false, }) => {
     const existing = await prisma_1.prisma.notification.findUnique({
         where: { eventKey },
     });
@@ -16,24 +16,33 @@ const emitNotification = async ({ type, spaceId, transactionId, actorId, title, 
             type,
             eventKey,
             actorId: actorId ?? null,
-            spaceId,
-            transactionId,
+            spaceId: spaceId ?? null,
+            transactionId: transactionId ?? null,
             title,
             body,
             metadata: metadata,
         },
     });
-    const members = await prisma_1.prisma.spaceMember.findMany({
-        where: { spaceId },
-        select: { userId: true },
-    });
-    await prisma_1.prisma.notificationRecipient.createMany({
-        data: members.map((member) => ({
-            notificationId: notification.id,
-            userId: member.userId,
-        })),
-        skipDuplicates: true,
-    });
+    const baseRecipientIds = recipientUserIds
+        ? Array.from(new Set(recipientUserIds))
+        : spaceId
+            ? (await prisma_1.prisma.spaceMember.findMany({
+                where: { spaceId },
+                select: { userId: true },
+            })).map((member) => member.userId)
+            : [];
+    const recipientIds = excludeActorFromRecipients
+        ? baseRecipientIds.filter((userId) => userId !== actorId)
+        : baseRecipientIds;
+    if (recipientIds.length > 0) {
+        await prisma_1.prisma.notificationRecipient.createMany({
+            data: recipientIds.map((userId) => ({
+                notificationId: notification.id,
+                userId,
+            })),
+            skipDuplicates: true,
+        });
+    }
     const recipients = await prisma_1.prisma.notificationRecipient.findMany({
         where: {
             notificationId: notification.id,
@@ -54,8 +63,9 @@ const emitNotification = async ({ type, spaceId, transactionId, actorId, title, 
                 title,
                 body,
                 createdAt: notification.createdAt.toISOString(),
-                spaceId,
-                transactionId,
+                spaceId: spaceId ?? undefined,
+                transactionId: transactionId ?? undefined,
+                metadata,
                 isRead: recipient.isRead,
             },
         });

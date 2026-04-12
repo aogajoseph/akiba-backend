@@ -32,8 +32,13 @@ const getUserNotifications = async ({ userId, cursor, limit = 20, }) => {
             title: item.notification.title,
             body: item.notification.body,
             createdAt: item.notification.createdAt.toISOString(),
-            spaceId: item.notification.spaceId,
-            transactionId: item.notification.transactionId,
+            spaceId: item.notification.spaceId ?? undefined,
+            transactionId: item.notification.transactionId ?? undefined,
+            metadata: item.notification.metadata &&
+                typeof item.notification.metadata === 'object' &&
+                !Array.isArray(item.notification.metadata)
+                ? item.notification.metadata
+                : undefined,
             isRead: item.isRead,
         })),
         nextCursor: hasNext ? items[items.length - 1]?.id : undefined,

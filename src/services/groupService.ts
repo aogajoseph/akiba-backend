@@ -999,6 +999,45 @@ export const updateGroup = async (
   await getSpaceMembershipOrThrow(groupId, actorUserId);
   requireSpaceCreator(space, actorUserId);
   const normalizedImageUrl = normalizeHostedImageUrl(dto.imageUrl);
+  const changedFields: string[] = [];
+  const currentDeadline = space.deadline?.toISOString() ?? null;
+  const nextDeadline = Object.prototype.hasOwnProperty.call(dto, 'deadline')
+    ? dto.deadline
+      ? new Date(dto.deadline).toISOString()
+      : null
+    : currentDeadline;
+
+  if (dto.name !== undefined && dto.name !== space.name) {
+    changedFields.push('name');
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(dto, 'description') &&
+    (dto.description ?? null) !== (space.description ?? null)
+  ) {
+    changedFields.push('description');
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(dto, 'imageUrl') &&
+    (normalizedImageUrl ?? null) !== (space.imageUrl ?? null)
+  ) {
+    changedFields.push('image');
+  }
+
+  if (
+    dto.targetAmount !== undefined &&
+    dto.targetAmount !== (space.targetAmount ?? undefined)
+  ) {
+    changedFields.push('targetAmount');
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(dto, 'deadline') &&
+    nextDeadline !== currentDeadline
+  ) {
+    changedFields.push('deadline');
+  }
 
   const updatedSpace = await prisma.space.update({
     where: {
@@ -1018,6 +1057,21 @@ export const updateGroup = async (
         : undefined,
     },
   });
+  if (changedFields.length > 0) {
+    await emitNotification({
+      type: NotificationType.space_updated,
+      spaceId: updatedSpace.id,
+      actorId: actorUserId,
+      eventKey: `space:${updatedSpace.id}:updated:${Date.now()}`,
+      title: 'Space updated',
+      body: 'Space details were updated',
+      metadata: {
+        updatedFields: changedFields,
+      },
+      excludeActorFromRecipients: true,
+    });
+  }
+
   const balance = await getCompletedBalanceForSpace(groupId);
 
   return mapDbSpaceToGroup(updatedSpace, balance);
@@ -2037,7 +2091,7 @@ export const deleteGroup = async (
   groupId: string,
   requesterUserId: string,
 ): Promise<string> => {
-  return prisma.$transaction(async (tx) => {
+  const deletionResult = await prisma.$transaction(async (tx) => {
     const [space, membership] = await Promise.all([
       tx.space.findUnique({
         where: {
@@ -2071,6 +2125,7 @@ export const deleteGroup = async (
       completedWithdrawals,
       transactionRecords,
       notificationsForSpace,
+      memberRecords,
     ] = await Promise.all([
       tx.transaction.count({
         where: {
@@ -2127,6 +2182,14 @@ export const deleteGroup = async (
         },
         select: {
           id: true,
+        },
+      }),
+      tx.spaceMember.findMany({
+        where: {
+          spaceId: groupId,
+        },
+        select: {
+          userId: true,
         },
       }),
     ]);
@@ -2197,6 +2260,23 @@ export const deleteGroup = async (
       },
     });
 
-    return groupId;
+    return {
+      memberUserIds: memberRecords.map((member) => member.userId),
+      spaceId: groupId,
+    };
   });
+
+  await emitNotification({
+    type: NotificationType.space_deleted,
+    spaceId: deletionResult.spaceId,
+    actorId: requesterUserId,
+    eventKey: `space:${deletionResult.spaceId}:deleted`,
+    title: 'Space deleted',
+    body: 'This space has been deleted by the creator',
+    metadata: {},
+    recipientUserIds: deletionResult.memberUserIds,
+    excludeActorFromRecipients: true,
+  });
+
+  return deletionResult.spaceId;
 };

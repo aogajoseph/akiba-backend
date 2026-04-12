@@ -732,6 +732,32 @@ const updateGroup = async (groupId, actorUserId, dto) => {
     await getSpaceMembershipOrThrow(groupId, actorUserId);
     requireSpaceCreator(space, actorUserId);
     const normalizedImageUrl = normalizeHostedImageUrl(dto.imageUrl);
+    const changedFields = [];
+    const currentDeadline = space.deadline?.toISOString() ?? null;
+    const nextDeadline = Object.prototype.hasOwnProperty.call(dto, 'deadline')
+        ? dto.deadline
+            ? new Date(dto.deadline).toISOString()
+            : null
+        : currentDeadline;
+    if (dto.name !== undefined && dto.name !== space.name) {
+        changedFields.push('name');
+    }
+    if (Object.prototype.hasOwnProperty.call(dto, 'description') &&
+        (dto.description ?? null) !== (space.description ?? null)) {
+        changedFields.push('description');
+    }
+    if (Object.prototype.hasOwnProperty.call(dto, 'imageUrl') &&
+        (normalizedImageUrl ?? null) !== (space.imageUrl ?? null)) {
+        changedFields.push('image');
+    }
+    if (dto.targetAmount !== undefined &&
+        dto.targetAmount !== (space.targetAmount ?? undefined)) {
+        changedFields.push('targetAmount');
+    }
+    if (Object.prototype.hasOwnProperty.call(dto, 'deadline') &&
+        nextDeadline !== currentDeadline) {
+        changedFields.push('deadline');
+    }
     const updatedSpace = await prisma_1.prisma.space.update({
         where: {
             id: groupId,
@@ -750,6 +776,20 @@ const updateGroup = async (groupId, actorUserId, dto) => {
                 : undefined,
         },
     });
+    if (changedFields.length > 0) {
+        await (0, notificationService_1.emitNotification)({
+            type: client_1.NotificationType.space_updated,
+            spaceId: updatedSpace.id,
+            actorId: actorUserId,
+            eventKey: `space:${updatedSpace.id}:updated:${Date.now()}`,
+            title: 'Space updated',
+            body: 'Space details were updated',
+            metadata: {
+                updatedFields: changedFields,
+            },
+            excludeActorFromRecipients: true,
+        });
+    }
     const balance = await (0, exports.getCompletedBalanceForSpace)(groupId);
     return mapDbSpaceToGroup(updatedSpace, balance);
 };
@@ -1558,7 +1598,7 @@ const leaveGroup = (groupId, memberId, requesterUserId) => {
 };
 exports.leaveGroup = leaveGroup;
 const deleteGroup = async (groupId, requesterUserId) => {
-    return prisma_1.prisma.$transaction(async (tx) => {
+    const deletionResult = await prisma_1.prisma.$transaction(async (tx) => {
         const [space, membership] = await Promise.all([
             tx.space.findUnique({
                 where: {
@@ -1581,7 +1621,7 @@ const deleteGroup = async (groupId, requesterUserId) => {
         if (space.createdById !== requesterUserId) {
             throw (0, http_1.createHttpError)(403, 'Only the creator can delete this space');
         }
-        const [activeWithdrawalCount, completedDeposits, pendingWithdrawals, completedWithdrawals, transactionRecords, notificationsForSpace,] = await Promise.all([
+        const [activeWithdrawalCount, completedDeposits, pendingWithdrawals, completedWithdrawals, transactionRecords, notificationsForSpace, memberRecords,] = await Promise.all([
             tx.transaction.count({
                 where: {
                     spaceId: groupId,
@@ -1637,6 +1677,14 @@ const deleteGroup = async (groupId, requesterUserId) => {
                 },
                 select: {
                     id: true,
+                },
+            }),
+            tx.spaceMember.findMany({
+                where: {
+                    spaceId: groupId,
+                },
+                select: {
+                    userId: true,
                 },
             }),
         ]);
@@ -1697,7 +1745,22 @@ const deleteGroup = async (groupId, requesterUserId) => {
                 id: groupId,
             },
         });
-        return groupId;
+        return {
+            memberUserIds: memberRecords.map((member) => member.userId),
+            spaceId: groupId,
+        };
     });
+    await (0, notificationService_1.emitNotification)({
+        type: client_1.NotificationType.space_deleted,
+        spaceId: deletionResult.spaceId,
+        actorId: requesterUserId,
+        eventKey: `space:${deletionResult.spaceId}:deleted`,
+        title: 'Space deleted',
+        body: 'This space has been deleted by the creator',
+        metadata: {},
+        recipientUserIds: deletionResult.memberUserIds,
+        excludeActorFromRecipients: true,
+    });
+    return deletionResult.spaceId;
 };
 exports.deleteGroup = deleteGroup;
