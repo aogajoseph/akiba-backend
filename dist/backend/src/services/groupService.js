@@ -33,6 +33,16 @@ const isUniqueConstraintError = (error) => {
         'code' in error &&
         error.code === 'P2002');
 };
+const normalizeHostedImageUrl = (value) => {
+    const normalizedValue = value?.trim();
+    if (!normalizedValue) {
+        return undefined;
+    }
+    if (!/^https?:\/\//i.test(normalizedValue)) {
+        throw (0, http_1.createHttpError)(400, 'imageUrl must be an http or https URL');
+    }
+    return normalizedValue;
+};
 const mapDbSpaceToGroup = (space, collectedAmount = 0) => {
     return {
         id: space.id,
@@ -535,11 +545,12 @@ const aggregateByDate = (entries) => {
     }));
 };
 const createGroup = (userId, dto) => {
+    const imageUrl = normalizeHostedImageUrl(dto.imageUrl ?? dto.image);
     const group = {
         id: (0, http_1.createId)('group'),
         name: dto.name,
         description: dto.description,
-        imageUrl: dto.image,
+        imageUrl,
         paybillNumber: getMpesaPaybillNumber(),
         accountNumber: generateAccountNumber(),
         targetAmount: dto.targetAmount,
@@ -564,13 +575,14 @@ const createGroup = (userId, dto) => {
 exports.createGroup = createGroup;
 const createSpace = async (input) => {
     const accountNumber = `AKB_${Date.now()}`;
+    const imageUrl = normalizeHostedImageUrl(input.imageUrl);
     try {
         const space = await prisma_1.prisma.$transaction(async (tx) => {
             const createdSpace = await tx.space.create({
                 data: {
                     name: input.name,
                     description: input.description,
-                    imageUrl: input.imageUrl,
+                    imageUrl,
                     targetAmount: input.targetAmount,
                     deadline: input.deadline ? new Date(input.deadline) : undefined,
                     paybillNumber: getMpesaPaybillNumber(),
@@ -719,6 +731,7 @@ const updateGroup = async (groupId, actorUserId, dto) => {
     const space = await getSpaceOrThrow(groupId);
     await getSpaceMembershipOrThrow(groupId, actorUserId);
     requireSpaceCreator(space, actorUserId);
+    const normalizedImageUrl = normalizeHostedImageUrl(dto.imageUrl);
     const updatedSpace = await prisma_1.prisma.space.update({
         where: {
             id: groupId,
@@ -728,7 +741,7 @@ const updateGroup = async (groupId, actorUserId, dto) => {
             description: Object.prototype.hasOwnProperty.call(dto, 'description')
                 ? dto.description ?? null
                 : undefined,
-            imageUrl: dto.imageUrl,
+            imageUrl: normalizedImageUrl,
             targetAmount: dto.targetAmount,
             deadline: Object.prototype.hasOwnProperty.call(dto, 'deadline')
                 ? dto.deadline

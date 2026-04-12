@@ -26,6 +26,7 @@ const mapSpaceToGroup = (space, financials) => {
         deadline: space.deadline?.toISOString(),
         createdByUserId: space.createdById,
         approvalThreshold: 2,
+        adminCount: financials?.adminCount,
         totalBalance: financials?.totalBalance,
         totalFees: financials?.totalFees,
         pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
@@ -44,8 +45,19 @@ const getGroupById = async (groupId) => {
     if (!space) {
         throw (0, http_1.createHttpError)(404, 'Group not found');
     }
-    const financialsBySpaceId = await (0, groupService_1.getSpaceFinancialSnapshotBySpaceIds)([normalizedGroupId]);
-    return mapSpaceToGroup(space, financialsBySpaceId.get(normalizedGroupId));
+    const [financialsBySpaceId, adminCount] = await Promise.all([
+        (0, groupService_1.getSpaceFinancialSnapshotBySpaceIds)([normalizedGroupId]),
+        prisma_1.prisma.spaceMember.count({
+            where: {
+                spaceId: normalizedGroupId,
+                role: 'admin',
+            },
+        }),
+    ]);
+    return mapSpaceToGroup(space, {
+        ...financialsBySpaceId.get(normalizedGroupId),
+        adminCount,
+    });
 };
 const requireMembership = async (groupId, userId) => {
     const normalizedGroupId = (0, http_1.ensureNonEmptyString)(groupId, 'groupId is required');
@@ -130,14 +142,32 @@ const parseOptionalStringField = (value, message) => {
         value: normalized.length > 0 ? normalized : undefined,
     };
 };
+const ensureOptionalHttpUrlString = (value, fieldName) => {
+    if (!value) {
+        return undefined;
+    }
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(value);
+    }
+    catch {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be a valid URL`);
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be an http or https URL`);
+    }
+    return parsedUrl.toString();
+};
 router.post('/', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
         const body = (0, http_1.getObjectBody)(req.body);
+        const imageUrl = ensureOptionalHttpUrlString((0, http_1.ensureOptionalNonEmptyString)(body.imageUrl ?? body.image, 'imageUrl must be a non-empty string'), 'imageUrl');
         const dto = {
             name: (0, http_1.ensureNonEmptyString)(body.name, 'name is required'),
             description: (0, http_1.ensureOptionalNonEmptyString)(body.description, 'description must be a non-empty string'),
-            image: (0, http_1.ensureOptionalNonEmptyString)(body.image, 'image must be a non-empty string'),
+            image: imageUrl,
+            imageUrl,
             targetAmount: body.targetAmount === undefined || body.targetAmount === null
                 ? undefined
                 : (0, http_1.ensurePositiveNumber)(body.targetAmount, 'targetAmount must be a positive number'),
@@ -146,7 +176,7 @@ router.post('/', async (req, res, next) => {
         const { space } = await (0, groupService_1.createSpace)({
             name: dto.name,
             description: dto.description,
-            imageUrl: dto.image,
+            imageUrl: dto.imageUrl ?? dto.image,
             targetAmount: dto.targetAmount,
             deadline: dto.deadline,
             createdById: user.id,
@@ -174,10 +204,29 @@ router.get('/', async (req, res, next) => {
                 space: true,
             },
         });
-        const financialsBySpaceId = await (0, groupService_1.getSpaceFinancialSnapshotBySpaceIds)(memberships.map((membership) => membership.space.id));
+        const spaceIds = memberships.map((membership) => membership.space.id);
+        const [financialsBySpaceId, adminCounts] = await Promise.all([
+            (0, groupService_1.getSpaceFinancialSnapshotBySpaceIds)(spaceIds),
+            prisma_1.prisma.spaceMember.groupBy({
+                by: ['spaceId'],
+                where: {
+                    spaceId: {
+                        in: spaceIds,
+                    },
+                    role: 'admin',
+                },
+                _count: {
+                    _all: true,
+                },
+            }),
+        ]);
+        const adminCountBySpaceId = new Map(adminCounts.map((item) => [item.spaceId, item._count._all]));
         const visibleGroups = Array.from(new Map(memberships.map((membership) => [
             membership.space.id,
-            mapSpaceToGroup(membership.space, financialsBySpaceId.get(membership.space.id)),
+            mapSpaceToGroup(membership.space, {
+                ...financialsBySpaceId.get(membership.space.id),
+                adminCount: adminCountBySpaceId.get(membership.space.id),
+            }),
         ])).values());
         const response = {
             data: {
@@ -379,7 +428,7 @@ router.patch('/:groupId', async (req, res, next) => {
             dto.description = descriptionField.value;
         }
         if (imageUrlField.provided) {
-            dto.imageUrl = imageUrlField.value;
+            dto.imageUrl = ensureOptionalHttpUrlString(imageUrlField.value, 'imageUrl');
         }
         if (body.targetAmount !== undefined) {
             dto.targetAmount =

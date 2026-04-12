@@ -52,6 +52,20 @@ const isUniqueConstraintError = (error: unknown): boolean => {
   );
 };
 
+const normalizeHostedImageUrl = (value: string | undefined): string | undefined => {
+  const normalizedValue = value?.trim();
+
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  if (!/^https?:\/\//i.test(normalizedValue)) {
+    throw createHttpError(400, 'imageUrl must be an http or https URL');
+  }
+
+  return normalizedValue;
+};
+
 const mapDbSpaceToGroup = (space: {
   accountNumber: string | null;
   approvalThreshold: number;
@@ -764,11 +778,12 @@ export const createGroup = (
   userId: string,
   dto: CreateGroupRequestDto,
 ): { group: Group; member: GroupMember } => {
+  const imageUrl = normalizeHostedImageUrl(dto.imageUrl ?? dto.image);
   const group: Group = {
     id: createId('group'),
     name: dto.name,
     description: dto.description,
-    imageUrl: dto.image,
+    imageUrl,
     paybillNumber: getMpesaPaybillNumber(),
     accountNumber: generateAccountNumber(),
     targetAmount: dto.targetAmount,
@@ -803,6 +818,7 @@ export const createSpace = async (input: {
   createdById: string;
 }): Promise<{ space: Group }> => {
   const accountNumber = `AKB_${Date.now()}`;
+  const imageUrl = normalizeHostedImageUrl(input.imageUrl);
 
   try {
     const space = await prisma.$transaction(async (tx) => {
@@ -810,7 +826,7 @@ export const createSpace = async (input: {
         data: {
           name: input.name,
           description: input.description,
-          imageUrl: input.imageUrl,
+          imageUrl,
           targetAmount: input.targetAmount,
           deadline: input.deadline ? new Date(input.deadline) : undefined,
           paybillNumber: getMpesaPaybillNumber(),
@@ -982,6 +998,7 @@ export const updateGroup = async (
   const space = await getSpaceOrThrow(groupId);
   await getSpaceMembershipOrThrow(groupId, actorUserId);
   requireSpaceCreator(space, actorUserId);
+  const normalizedImageUrl = normalizeHostedImageUrl(dto.imageUrl);
 
   const updatedSpace = await prisma.space.update({
     where: {
@@ -992,7 +1009,7 @@ export const updateGroup = async (
       description: Object.prototype.hasOwnProperty.call(dto, 'description')
         ? dto.description ?? null
         : undefined,
-      imageUrl: dto.imageUrl,
+      imageUrl: normalizedImageUrl,
       targetAmount: dto.targetAmount,
       deadline: Object.prototype.hasOwnProperty.call(dto, 'deadline')
         ? dto.deadline

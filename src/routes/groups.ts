@@ -88,6 +88,7 @@ const mapSpaceToGroup = (space: {
   paybillNumber: string | null;
   targetAmount: number | null;
 }, financials?: {
+  adminCount?: number;
   availableBalance?: number;
   pendingWithdrawalAmount?: number;
   reservedAmount?: number;
@@ -106,6 +107,7 @@ const mapSpaceToGroup = (space: {
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
     approvalThreshold: 2,
+    adminCount: financials?.adminCount,
     totalBalance: financials?.totalBalance,
     totalFees: financials?.totalFees,
     pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
@@ -127,8 +129,20 @@ const getGroupById = async (groupId: string): Promise<Group> => {
     throw createHttpError(404, 'Group not found');
   }
 
-  const financialsBySpaceId = await getSpaceFinancialSnapshotBySpaceIds([normalizedGroupId]);
-  return mapSpaceToGroup(space, financialsBySpaceId.get(normalizedGroupId));
+  const [financialsBySpaceId, adminCount] = await Promise.all([
+    getSpaceFinancialSnapshotBySpaceIds([normalizedGroupId]),
+    prisma.spaceMember.count({
+      where: {
+        spaceId: normalizedGroupId,
+        role: 'admin',
+      },
+    }),
+  ]);
+
+  return mapSpaceToGroup(space, {
+    ...financialsBySpaceId.get(normalizedGroupId),
+    adminCount,
+  });
 };
 
 const requireMembership = async (groupId: string, userId: string) => {
@@ -252,20 +266,48 @@ const parseOptionalStringField = (
   };
 };
 
+const ensureOptionalHttpUrlString = (
+  value: string | undefined,
+  fieldName: string,
+): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(value);
+  } catch {
+    throw createHttpError(400, `${fieldName} must be a valid URL`);
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw createHttpError(400, `${fieldName} must be an http or https URL`);
+  }
+
+  return parsedUrl.toString();
+};
+
 router.post('/', async (req, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
     const body = getObjectBody(req.body);
+    const imageUrl = ensureOptionalHttpUrlString(
+      ensureOptionalNonEmptyString(
+        body.imageUrl ?? body.image,
+        'imageUrl must be a non-empty string',
+      ),
+      'imageUrl',
+    );
     const dto: CreateGroupRequestDto = {
       name: ensureNonEmptyString(body.name, 'name is required'),
       description: ensureOptionalNonEmptyString(
         body.description,
         'description must be a non-empty string',
       ),
-      image: ensureOptionalNonEmptyString(
-        body.image,
-        'image must be a non-empty string',
-      ),
+      image: imageUrl,
+      imageUrl,
       targetAmount:
         body.targetAmount === undefined || body.targetAmount === null
           ? undefined
@@ -279,7 +321,7 @@ router.post('/', async (req, res, next) => {
     const { space } = await createSpace({
       name: dto.name,
       description: dto.description,
-      imageUrl: dto.image,
+      imageUrl: dto.imageUrl ?? dto.image,
       targetAmount: dto.targetAmount,
       deadline: dto.deadline,
       createdById: user.id,
@@ -309,8 +351,24 @@ router.get('/', async (req, res, next) => {
         space: true,
       },
     });
-    const financialsBySpaceId = await getSpaceFinancialSnapshotBySpaceIds(
-      memberships.map((membership) => membership.space.id),
+    const spaceIds = memberships.map((membership) => membership.space.id);
+    const [financialsBySpaceId, adminCounts] = await Promise.all([
+      getSpaceFinancialSnapshotBySpaceIds(spaceIds),
+      prisma.spaceMember.groupBy({
+        by: ['spaceId'],
+        where: {
+          spaceId: {
+            in: spaceIds,
+          },
+          role: 'admin',
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+    ]);
+    const adminCountBySpaceId = new Map(
+      adminCounts.map((item) => [item.spaceId, item._count._all]),
     );
     const visibleGroups = Array.from(
       new Map(
@@ -318,7 +376,10 @@ router.get('/', async (req, res, next) => {
           membership.space.id,
           mapSpaceToGroup(
             membership.space,
-            financialsBySpaceId.get(membership.space.id),
+            {
+              ...financialsBySpaceId.get(membership.space.id),
+              adminCount: adminCountBySpaceId.get(membership.space.id),
+            },
           ),
         ]),
       ).values(),
@@ -562,7 +623,7 @@ router.patch('/:groupId', async (req: Request<GroupParams>, res, next) => {
     }
 
     if (imageUrlField.provided) {
-      dto.imageUrl = imageUrlField.value;
+      dto.imageUrl = ensureOptionalHttpUrlString(imageUrlField.value, 'imageUrl');
     }
 
     if (body.targetAmount !== undefined) {
