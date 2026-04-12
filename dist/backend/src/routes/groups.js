@@ -457,7 +457,7 @@ router.patch('/:groupId', async (req, res, next) => {
 router.delete('/:groupId', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
-        (0, groupService_1.deleteGroup)(req.params.groupId, user.id);
+        await (0, groupService_1.deleteGroup)(req.params.groupId, user.id);
         const response = {
             data: {
                 success: true,

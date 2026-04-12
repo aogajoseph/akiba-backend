@@ -2033,50 +2033,170 @@ export const leaveGroup = (
   return member;
 };
 
-export const deleteGroup = (groupId: string, requesterUserId: string): string => {
-  const group = getGroupOrThrow(groupId);
+export const deleteGroup = async (
+  groupId: string,
+  requesterUserId: string,
+): Promise<string> => {
+  return prisma.$transaction(async (tx) => {
+    const [space, membership] = await Promise.all([
+      tx.space.findUnique({
+        where: {
+          id: groupId,
+        },
+      }),
+      tx.spaceMember.findFirst({
+        where: {
+          spaceId: groupId,
+          userId: requesterUserId,
+        },
+      }),
+    ]);
 
-  if (group.createdByUserId !== requesterUserId) {
-    throw createHttpError(403, 'Only the creator can delete this group');
-  }
-
-  const groupTransactions = transactions.filter((item) => item.groupId === groupId);
-
-  if (groupTransactions.some((item) => item.status === TransactionStatus.PENDING_APPROVAL)) {
-    throw createHttpError(409, 'Cannot delete group with pending transactions');
-  }
-
-  if (groupTransactions.some((item) => item.status !== TransactionStatus.COMPLETED)) {
-    throw createHttpError(409, 'Cannot delete group with active funds in system');
-  }
-
-  const groupTransactionIds = new Set(groupTransactions.map((item) => item.id));
-
-  for (let index = approvals.length - 1; index >= 0; index -= 1) {
-    if (groupTransactionIds.has(approvals[index].transactionId)) {
-      approvals.splice(index, 1);
+    if (!space) {
+      throw createHttpError(404, 'Space not found');
     }
-  }
 
-  for (let index = transactions.length - 1; index >= 0; index -= 1) {
-    if (transactions[index].groupId === groupId) {
-      transactions.splice(index, 1);
+    if (!membership) {
+      throw createHttpError(403, 'You are not a member of this space');
     }
-  }
 
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].groupId === groupId) {
-      messages.splice(index, 1);
+    if (space.createdById !== requesterUserId) {
+      throw createHttpError(403, 'Only the creator can delete this space');
     }
-  }
 
-  for (let index = groupMembers.length - 1; index >= 0; index -= 1) {
-    if (groupMembers[index].groupId === groupId) {
-      groupMembers.splice(index, 1);
+    const [
+      activeWithdrawalCount,
+      completedDeposits,
+      pendingWithdrawals,
+      completedWithdrawals,
+      transactionRecords,
+      notificationsForSpace,
+    ] = await Promise.all([
+      tx.transaction.count({
+        where: {
+          spaceId: groupId,
+          type: TransactionType.WITHDRAWAL,
+          status: {
+            in: [TransactionStatus.PENDING_APPROVAL, TransactionStatus.APPROVED],
+          },
+        },
+      }),
+      tx.transaction.aggregate({
+        where: {
+          spaceId: groupId,
+          type: TransactionType.DEPOSIT,
+          status: TransactionStatus.COMPLETED,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      tx.transaction.aggregate({
+        where: {
+          spaceId: groupId,
+          type: TransactionType.WITHDRAWAL,
+          status: {
+            in: [TransactionStatus.PENDING_APPROVAL, TransactionStatus.APPROVED],
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      tx.transaction.aggregate({
+        where: {
+          spaceId: groupId,
+          type: TransactionType.WITHDRAWAL,
+          status: TransactionStatus.COMPLETED,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      tx.transaction.findMany({
+        where: {
+          spaceId: groupId,
+        },
+        select: {
+          id: true,
+        },
+      }),
+      tx.notification.findMany({
+        where: {
+          spaceId: groupId,
+        },
+        select: {
+          id: true,
+        },
+      }),
+    ]);
+
+    if (activeWithdrawalCount > 0) {
+      throw createHttpError(400, 'Cannot delete space with pending withdrawals');
     }
-  }
 
-  removeById(groups, group.id);
+    const totalDeposits = Number(completedDeposits._sum.amount ?? 0);
+    const reservedWithdrawals = Number(pendingWithdrawals._sum.amount ?? 0);
+    const totalWithdrawals = Number(completedWithdrawals._sum.amount ?? 0);
+    const effectiveDeposits = roundCurrency(
+      totalDeposits - totalWithdrawals - reservedWithdrawals,
+    );
+    const totalFees = calculateServiceFee(effectiveDeposits);
+    const availableBalance = roundCurrency(effectiveDeposits - totalFees);
 
-  return group.id;
+    if (availableBalance !== 0) {
+      throw createHttpError(400, 'Space balance must be zero before deletion');
+    }
+
+    const transactionIds = transactionRecords.map((transaction) => transaction.id);
+    const notificationIds = notificationsForSpace.map((notification) => notification.id);
+
+    if (notificationIds.length > 0) {
+      await tx.notificationRecipient.deleteMany({
+        where: {
+          notificationId: {
+            in: notificationIds,
+          },
+        },
+      });
+    }
+
+    if (transactionIds.length > 0) {
+      await tx.withdrawalApproval.deleteMany({
+        where: {
+          transactionId: {
+            in: transactionIds,
+          },
+        },
+      });
+    }
+
+    await tx.notification.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
+    await tx.transaction.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
+    await tx.spaceMember.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
+    await tx.webhookEvent.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
+    await tx.space.delete({
+      where: {
+        id: groupId,
+      },
+    });
+
+    return groupId;
+  });
 };

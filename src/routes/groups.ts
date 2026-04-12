@@ -657,7 +657,7 @@ router.patch('/:groupId', async (req: Request<GroupParams>, res, next) => {
 router.delete('/:groupId', async (req: Request<GroupParams>, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
-    deleteGroup(req.params.groupId, user.id);
+    await deleteGroup(req.params.groupId, user.id);
 
     const response: ApiResponse<DeleteGroupResponseDto> = {
       data: {
