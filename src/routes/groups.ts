@@ -88,7 +88,7 @@ const mapSpaceToGroup = (space: {
   paybillNumber: string | null;
   targetAmount: number | null;
 }, financials?: {
-  adminCount?: number;
+  membersCount?: number;
   availableBalance?: number;
   pendingWithdrawalAmount?: number;
   reservedAmount?: number;
@@ -107,7 +107,7 @@ const mapSpaceToGroup = (space: {
     deadline: space.deadline?.toISOString(),
     createdByUserId: space.createdById,
     approvalThreshold: 2,
-    adminCount: financials?.adminCount,
+    membersCount: financials?.membersCount,
     totalBalance: financials?.totalBalance,
     totalFees: financials?.totalFees,
     pendingWithdrawalAmount: financials?.pendingWithdrawalAmount,
@@ -129,19 +129,18 @@ const getGroupById = async (groupId: string): Promise<Group> => {
     throw createHttpError(404, 'Group not found');
   }
 
-  const [financialsBySpaceId, adminCount] = await Promise.all([
+  const [financialsBySpaceId, membersCount] = await Promise.all([
     getSpaceFinancialSnapshotBySpaceIds([normalizedGroupId]),
     prisma.spaceMember.count({
       where: {
         spaceId: normalizedGroupId,
-        role: 'admin',
       },
     }),
   ]);
 
   return mapSpaceToGroup(space, {
     ...financialsBySpaceId.get(normalizedGroupId),
-    adminCount,
+    membersCount,
   });
 };
 
@@ -352,7 +351,7 @@ router.get('/', async (req, res, next) => {
       },
     });
     const spaceIds = memberships.map((membership) => membership.space.id);
-    const [financialsBySpaceId, adminCounts] = await Promise.all([
+    const [financialsBySpaceId, memberCounts] = await Promise.all([
       getSpaceFinancialSnapshotBySpaceIds(spaceIds),
       prisma.spaceMember.groupBy({
         by: ['spaceId'],
@@ -360,15 +359,14 @@ router.get('/', async (req, res, next) => {
           spaceId: {
             in: spaceIds,
           },
-          role: 'admin',
         },
         _count: {
           _all: true,
         },
       }),
     ]);
-    const adminCountBySpaceId = new Map(
-      adminCounts.map((item) => [item.spaceId, item._count._all]),
+    const membersCountBySpaceId = new Map(
+      memberCounts.map((item) => [item.spaceId, item._count._all]),
     );
     const visibleGroups = Array.from(
       new Map(
@@ -378,7 +376,7 @@ router.get('/', async (req, res, next) => {
             membership.space,
             {
               ...financialsBySpaceId.get(membership.space.id),
-              adminCount: adminCountBySpaceId.get(membership.space.id),
+              membersCount: membersCountBySpaceId.get(membership.space.id),
             },
           ),
         ]),
