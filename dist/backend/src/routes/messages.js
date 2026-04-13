@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const store_1 = require("../data/store");
+const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const auth_1 = require("../utils/auth");
 const media_1 = require("../utils/media");
@@ -10,15 +11,27 @@ const getCurrentUser = async (headerValue) => {
     const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
     return (0, auth_1.getCurrentUserOrThrow)(userId);
 };
-const getGroupById = (groupId) => {
-    const group = store_1.groups.find((item) => item.id === groupId);
-    if (!group) {
+const getSpaceId = (params) => {
+    return (0, http_1.ensureNonEmptyString)(params.spaceId ?? params.groupId, 'spaceId is required');
+};
+const getSpaceById = async (spaceId) => {
+    const space = await prisma_1.prisma.space.findUnique({
+        where: {
+            id: spaceId,
+        },
+    });
+    if (!space) {
         throw (0, http_1.createHttpError)(404, 'Group not found');
     }
-    return group;
+    return space;
 };
-const requireMembership = (groupId, userId) => {
-    const membership = store_1.groupMembers.find((item) => item.groupId === groupId && item.userId === userId);
+const requireMembership = async (spaceId, userId) => {
+    const membership = await prisma_1.prisma.spaceMember.findFirst({
+        where: {
+            spaceId,
+            userId,
+        },
+    });
     if (!membership) {
         throw (0, http_1.createHttpError)(403, 'You are not a member of this group');
     }
@@ -26,14 +39,14 @@ const requireMembership = (groupId, userId) => {
 };
 router.get('/', async (req, res, next) => {
     try {
-        const { groupId } = req.params;
+        const spaceId = getSpaceId(req.params);
         const user = await getCurrentUser(req.header('x-user-id'));
-        getGroupById(groupId);
-        requireMembership(groupId, user.id);
+        await getSpaceById(spaceId);
+        await requireMembership(spaceId, user.id);
         const response = {
             data: {
                 messages: store_1.messages
-                    .filter((item) => item.groupId === groupId)
+                    .filter((item) => item.groupId === spaceId)
                     .map((item) => ({
                     ...item,
                     reactions: item.reactions ?? [],
@@ -49,22 +62,22 @@ router.get('/', async (req, res, next) => {
 });
 router.post('/', async (req, res, next) => {
     try {
-        const { groupId } = req.params;
+        const spaceId = getSpaceId(req.params);
         const user = await getCurrentUser(req.header('x-user-id'));
-        getGroupById(groupId);
-        requireMembership(groupId, user.id);
+        await getSpaceById(spaceId);
+        await requireMembership(spaceId, user.id);
         const body = (0, http_1.getObjectBody)(req.body);
         const dto = {
             text: (0, http_1.ensureNonEmptyString)(body.text, 'text is required'),
             replyToMessageId: (0, http_1.ensureOptionalNonEmptyString)(body.replyToMessageId, 'replyToMessageId must be a non-empty string'),
         };
         if (dto.replyToMessageId &&
-            !store_1.messages.some((item) => item.groupId === groupId && item.id === dto.replyToMessageId)) {
+            !store_1.messages.some((item) => item.groupId === spaceId && item.id === dto.replyToMessageId)) {
             throw (0, http_1.createHttpError)(404, 'Reply target message not found');
         }
         const message = {
             id: (0, http_1.createId)('message'),
-            groupId,
+            groupId: spaceId,
             senderUserId: user.id,
             text: dto.text,
             replyToMessageId: dto.replyToMessageId,
@@ -86,20 +99,20 @@ router.post('/', async (req, res, next) => {
 });
 router.post('/media', async (req, res, next) => {
     try {
-        const { groupId } = req.params;
+        const spaceId = getSpaceId(req.params);
         const user = await getCurrentUser(req.header('x-user-id'));
-        getGroupById(groupId);
-        requireMembership(groupId, user.id);
+        await getSpaceById(spaceId);
+        await requireMembership(spaceId, user.id);
         const { fields, files } = await (0, media_1.parseMultipartFormData)(req);
         const text = (0, http_1.ensureOptionalNonEmptyString)(fields.text, 'text must be a non-empty string');
         const replyToMessageId = (0, http_1.ensureOptionalNonEmptyString)(fields.replyToMessageId, 'replyToMessageId must be a non-empty string');
-        if (replyToMessageId && !store_1.messages.some((item) => item.groupId === groupId && item.id === replyToMessageId)) {
+        if (replyToMessageId && !store_1.messages.some((item) => item.groupId === spaceId && item.id === replyToMessageId)) {
             throw (0, http_1.createHttpError)(404, 'Reply target message not found');
         }
         const media = await (0, media_1.storeMediaFiles)(req, files.filter((file) => file.fieldName === 'file'));
         const message = {
             id: (0, http_1.createId)('message'),
-            groupId,
+            groupId: spaceId,
             senderUserId: user.id,
             text: text ?? '',
             replyToMessageId,
@@ -122,15 +135,16 @@ router.post('/media', async (req, res, next) => {
 });
 router.post('/:messageId/reactions', async (req, res, next) => {
     try {
-        const { groupId, messageId } = req.params;
+        const spaceId = getSpaceId(req.params);
+        const { messageId } = req.params;
         const user = await getCurrentUser(req.header('x-user-id'));
-        getGroupById(groupId);
-        requireMembership(groupId, user.id);
+        await getSpaceById(spaceId);
+        await requireMembership(spaceId, user.id);
         const body = (0, http_1.getObjectBody)(req.body);
         const dto = {
             emoji: (0, http_1.ensureNonEmptyString)(body.emoji, 'emoji is required'),
         };
-        const message = store_1.messages.find((item) => item.groupId === groupId && item.id === messageId);
+        const message = store_1.messages.find((item) => item.groupId === spaceId && item.id === messageId);
         if (!message) {
             throw (0, http_1.createHttpError)(404, 'Message not found');
         }
@@ -162,11 +176,12 @@ router.post('/:messageId/reactions', async (req, res, next) => {
 });
 router.delete('/:messageId', async (req, res, next) => {
     try {
-        const { groupId, messageId } = req.params;
+        const spaceId = getSpaceId(req.params);
+        const { messageId } = req.params;
         const user = await getCurrentUser(req.header('x-user-id'));
-        getGroupById(groupId);
-        requireMembership(groupId, user.id);
-        const messageIndex = store_1.messages.findIndex((item) => item.groupId === groupId && item.id === messageId);
+        await getSpaceById(spaceId);
+        await requireMembership(spaceId, user.id);
+        const messageIndex = store_1.messages.findIndex((item) => item.groupId === spaceId && item.id === messageId);
         if (messageIndex < 0) {
             throw (0, http_1.createHttpError)(404, 'Message not found');
         }

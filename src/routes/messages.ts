@@ -5,8 +5,6 @@ import {
   CreateMessageRequestDto,
   CreateMessageResponseDto,
   DeleteMessageResponseDto,
-  Group,
-  GroupMember,
   ListMessagesResponseDto,
   Message,
   ToggleMessageReactionRequestDto,
@@ -14,7 +12,8 @@ import {
   UploadMediaMessageResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups, messages } from '../data/store';
+import { messages } from '../data/store';
+import { prisma } from '../lib/prisma';
 import {
   createHttpError,
   createId,
@@ -28,11 +27,13 @@ import { parseMultipartFormData, storeMediaFiles } from '../utils/media';
 const router = Router({ mergeParams: true });
 
 type GroupParams = {
-  groupId: string;
+  groupId?: string;
+  spaceId?: string;
 };
 
 type MessageParams = {
-  groupId: string;
+  groupId?: string;
+  spaceId?: string;
   messageId: string;
 };
 
@@ -41,20 +42,31 @@ const getCurrentUser = async (headerValue: string | undefined): Promise<User> =>
   return getCurrentUserOrThrow(userId);
 };
 
-const getGroupById = (groupId: string): Group => {
-  const group = groups.find((item) => item.id === groupId);
+const getSpaceId = (params: Record<string, string | undefined>): string => {
+  return ensureNonEmptyString(params.spaceId ?? params.groupId, 'spaceId is required');
+};
 
-  if (!group) {
+const getSpaceById = async (spaceId: string) => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
+
+  if (!space) {
     throw createHttpError(404, 'Group not found');
   }
 
-  return group;
+  return space;
 };
 
-const requireMembership = (groupId: string, userId: string): GroupMember => {
-  const membership = groupMembers.find(
-    (item) => item.groupId === groupId && item.userId === userId,
-  );
+const requireMembership = async (spaceId: string, userId: string) => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId,
+      userId,
+    },
+  });
 
   if (!membership) {
     throw createHttpError(403, 'You are not a member of this group');
@@ -65,15 +77,15 @@ const requireMembership = (groupId: string, userId: string): GroupMember => {
 
 router.get('/', async (req: Request<GroupParams>, res, next) => {
   try {
-    const { groupId } = req.params;
+    const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
 
     const response: ApiResponse<ListMessagesResponseDto> = {
       data: {
         messages: messages
-          .filter((item) => item.groupId === groupId)
+          .filter((item) => item.groupId === spaceId)
           .map((item) => ({
             ...item,
             reactions: item.reactions ?? [],
@@ -90,10 +102,10 @@ router.get('/', async (req: Request<GroupParams>, res, next) => {
 
 router.post('/', async (req: Request<GroupParams>, res, next) => {
   try {
-    const { groupId } = req.params;
+    const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
     const body = getObjectBody(req.body);
     const dto: CreateMessageRequestDto = {
       text: ensureNonEmptyString(body.text, 'text is required'),
@@ -105,14 +117,14 @@ router.post('/', async (req: Request<GroupParams>, res, next) => {
 
     if (
       dto.replyToMessageId &&
-      !messages.some((item) => item.groupId === groupId && item.id === dto.replyToMessageId)
+      !messages.some((item) => item.groupId === spaceId && item.id === dto.replyToMessageId)
     ) {
       throw createHttpError(404, 'Reply target message not found');
     }
 
     const message: Message = {
       id: createId('message'),
-      groupId,
+      groupId: spaceId,
       senderUserId: user.id,
       text: dto.text,
       replyToMessageId: dto.replyToMessageId,
@@ -137,10 +149,10 @@ router.post('/', async (req: Request<GroupParams>, res, next) => {
 
 router.post('/media', async (req: Request<GroupParams>, res, next) => {
   try {
-    const { groupId } = req.params;
+    const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
 
     const { fields, files } = await parseMultipartFormData(req);
     const text = ensureOptionalNonEmptyString(fields.text, 'text must be a non-empty string');
@@ -149,7 +161,7 @@ router.post('/media', async (req: Request<GroupParams>, res, next) => {
       'replyToMessageId must be a non-empty string',
     );
 
-    if (replyToMessageId && !messages.some((item) => item.groupId === groupId && item.id === replyToMessageId)) {
+    if (replyToMessageId && !messages.some((item) => item.groupId === spaceId && item.id === replyToMessageId)) {
       throw createHttpError(404, 'Reply target message not found');
     }
 
@@ -157,7 +169,7 @@ router.post('/media', async (req: Request<GroupParams>, res, next) => {
 
     const message: Message = {
       id: createId('message'),
-      groupId,
+      groupId: spaceId,
       senderUserId: user.id,
       text: text ?? '',
       replyToMessageId,
@@ -183,17 +195,18 @@ router.post('/media', async (req: Request<GroupParams>, res, next) => {
 
 router.post('/:messageId/reactions', async (req: Request<MessageParams>, res, next) => {
   try {
-    const { groupId, messageId } = req.params;
+    const spaceId = getSpaceId(req.params);
+    const { messageId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
 
     const body = getObjectBody(req.body);
     const dto: ToggleMessageReactionRequestDto = {
       emoji: ensureNonEmptyString(body.emoji, 'emoji is required'),
     };
 
-    const message = messages.find((item) => item.groupId === groupId && item.id === messageId);
+    const message = messages.find((item) => item.groupId === spaceId && item.id === messageId);
 
     if (!message) {
       throw createHttpError(404, 'Message not found');
@@ -230,13 +243,14 @@ router.post('/:messageId/reactions', async (req: Request<MessageParams>, res, ne
 
 router.delete('/:messageId', async (req: Request<MessageParams>, res, next) => {
   try {
-    const { groupId, messageId } = req.params;
+    const spaceId = getSpaceId(req.params);
+    const { messageId } = req.params;
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(groupId);
-    requireMembership(groupId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
 
     const messageIndex = messages.findIndex(
-      (item) => item.groupId === groupId && item.id === messageId,
+      (item) => item.groupId === spaceId && item.id === messageId,
     );
 
     if (messageIndex < 0) {

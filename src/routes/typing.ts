@@ -2,12 +2,11 @@ import { Request, Router } from 'express';
 
 import {
   ApiResponse,
-  Group,
-  GroupMember,
   ListTypingUsersResponseDto,
   User,
 } from '../../../shared/contracts';
-import { groupMembers, groups, typingUsers } from '../data/store';
+import { typingUsers } from '../data/store';
+import { prisma } from '../lib/prisma';
 import { createHttpError, ensureNonEmptyString } from '../utils/http';
 import { getCurrentUserOrThrow, getUsersByIds } from '../utils/auth';
 
@@ -27,20 +26,27 @@ const getSpaceId = (params: Record<string, string | undefined>): string => {
   return ensureNonEmptyString(params.spaceId ?? params.groupId, 'spaceId is required');
 };
 
-const getGroupById = (groupId: string): Group => {
-  const group = groups.find((item) => item.id === groupId);
+const getSpaceById = async (spaceId: string) => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+  });
 
-  if (!group) {
+  if (!space) {
     throw createHttpError(404, 'Group not found');
   }
 
-  return group;
+  return space;
 };
 
-const requireMembership = (groupId: string, userId: string): GroupMember => {
-  const membership = groupMembers.find(
-    (item) => item.groupId === groupId && item.userId === userId,
-  );
+const requireMembership = async (spaceId: string, userId: string) => {
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId,
+      userId,
+    },
+  });
 
   if (!membership) {
     throw createHttpError(403, 'You are not a member of this group');
@@ -61,8 +67,8 @@ router.get('/', async (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(spaceId);
-    requireMembership(spaceId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
     const typingUserIds = Array.from(getTypingSet(spaceId));
     const usersById = await getUsersByIds(typingUserIds);
 
@@ -95,8 +101,8 @@ router.post('/start', async (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(spaceId);
-    requireMembership(spaceId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
 
     getTypingSet(spaceId).add(user.id);
 
@@ -110,8 +116,8 @@ router.post('/stop', async (req: Request<TypingParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
-    getGroupById(spaceId);
-    requireMembership(spaceId, user.id);
+    await getSpaceById(spaceId);
+    await requireMembership(spaceId, user.id);
 
     typingUsers[spaceId]?.delete(user.id);
 

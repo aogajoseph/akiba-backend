@@ -110,7 +110,7 @@ app.use('/spaces', groups_1.default);
 app.use('/groups/:groupId/transactions', transactions_1.default);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvals_1.default);
 app.use('/groups/:groupId/messages', messages_1.default);
-app.use('/spaces/:groupId/messages', messages_1.default);
+app.use('/spaces/:spaceId/messages', messages_1.default);
 app.use('/groups/:groupId/typing', typing_1.default);
 app.use('/spaces/:spaceId/typing', typing_1.default);
 app.use((_req, res) => {

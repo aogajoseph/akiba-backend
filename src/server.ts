@@ -135,7 +135,7 @@ app.use('/spaces', groupsRouter);
 app.use('/groups/:groupId/transactions', transactionsRouter);
 app.use('/groups/:groupId/transactions/:transactionId/approvals', approvalsRouter);
 app.use('/groups/:groupId/messages', messagesRouter);
-app.use('/spaces/:groupId/messages', messagesRouter);
+app.use('/spaces/:spaceId/messages', messagesRouter);
 app.use('/groups/:groupId/typing', typingRouter);
 app.use('/spaces/:spaceId/typing', typingRouter);
 
