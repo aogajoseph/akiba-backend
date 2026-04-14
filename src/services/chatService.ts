@@ -1,5 +1,10 @@
 import { MessageStatus, type Message as ContractMessage, type MessageMedia } from '../../../shared/contracts';
 import { prisma } from '../lib/prisma';
+import {
+  emitMessageCreated,
+  emitMessageDeleted,
+  emitReactionUpdated,
+} from './chatRealtimeService';
 import { createHttpError } from '../utils/http';
 
 const ensureSpaceMembership = async (spaceId: string, userId: string) => {
@@ -198,7 +203,13 @@ export const createMessage = async (input: {
     },
   });
 
-  return mapDbMessageToContractMessage(createdMessage);
+  const message = mapDbMessageToContractMessage(createdMessage);
+  emitMessageCreated({
+    spaceId: input.spaceId,
+    message,
+  });
+
+  return message;
 };
 
 export const toggleMessageReaction = async (input: {
@@ -240,7 +251,13 @@ export const toggleMessageReaction = async (input: {
   }
 
   const updatedMessage = await getMessageByIdOrThrow(input.spaceId, input.messageId);
-  return mapDbMessageToContractMessage(updatedMessage);
+  const message = mapDbMessageToContractMessage(updatedMessage);
+  emitReactionUpdated({
+    spaceId: input.spaceId,
+    message,
+  });
+
+  return message;
 };
 
 export const deleteMessage = async (input: {
@@ -296,5 +313,10 @@ export const deleteMessage = async (input: {
         id: message.id,
       },
     });
+  });
+
+  emitMessageDeleted({
+    spaceId: input.spaceId,
+    messageId: message.id,
   });
 };

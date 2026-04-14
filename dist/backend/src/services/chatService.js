@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteMessage = exports.toggleMessageReaction = exports.createMessage = exports.listMessages = void 0;
 const prisma_1 = require("../lib/prisma");
+const chatRealtimeService_1 = require("./chatRealtimeService");
 const http_1 = require("../utils/http");
 const ensureSpaceMembership = async (spaceId, userId) => {
     const [space, membership] = await Promise.all([
@@ -153,7 +154,12 @@ const createMessage = async (input) => {
             },
         },
     });
-    return mapDbMessageToContractMessage(createdMessage);
+    const message = mapDbMessageToContractMessage(createdMessage);
+    (0, chatRealtimeService_1.emitMessageCreated)({
+        spaceId: input.spaceId,
+        message,
+    });
+    return message;
 };
 exports.createMessage = createMessage;
 const toggleMessageReaction = async (input) => {
@@ -188,7 +194,12 @@ const toggleMessageReaction = async (input) => {
         });
     }
     const updatedMessage = await getMessageByIdOrThrow(input.spaceId, input.messageId);
-    return mapDbMessageToContractMessage(updatedMessage);
+    const message = mapDbMessageToContractMessage(updatedMessage);
+    (0, chatRealtimeService_1.emitReactionUpdated)({
+        spaceId: input.spaceId,
+        message,
+    });
+    return message;
 };
 exports.toggleMessageReaction = toggleMessageReaction;
 const deleteMessage = async (input) => {
@@ -233,6 +244,10 @@ const deleteMessage = async (input) => {
                 id: message.id,
             },
         });
+    });
+    (0, chatRealtimeService_1.emitMessageDeleted)({
+        spaceId: input.spaceId,
+        messageId: message.id,
     });
 };
 exports.deleteMessage = deleteMessage;

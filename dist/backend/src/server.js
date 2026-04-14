@@ -19,6 +19,7 @@ const payments_1 = __importDefault(require("./routes/payments"));
 const typing_1 = __importDefault(require("./routes/typing"));
 const transactions_1 = __importDefault(require("./routes/transactions"));
 const users_1 = __importDefault(require("./routes/users"));
+const chatRealtimeService_1 = require("./services/chatRealtimeService");
 const prisma_1 = require("./lib/prisma");
 const notificationRealtimeService_1 = require("./services/notificationRealtimeService");
 const http_2 = require("./utils/http");
@@ -103,6 +104,7 @@ io.on('connection', (socket) => {
         removeSocketPresence(socket.id);
     });
 });
+(0, chatRealtimeService_1.attachChatSocketServer)(io);
 (0, notificationRealtimeService_1.attachNotificationWebSocketServer)(httpServer);
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());

@@ -15,6 +15,7 @@ import paymentsRouter from './routes/payments';
 import typingRouter from './routes/typing';
 import transactionsRouter from './routes/transactions';
 import usersRouter from './routes/users';
+import { attachChatSocketServer } from './services/chatRealtimeService';
 import { prisma } from './lib/prisma';
 import { attachNotificationWebSocketServer } from './services/notificationRealtimeService';
 import { errorHandler } from './utils/http';
@@ -127,6 +128,7 @@ io.on('connection', (socket) => {
   });
 });
 
+attachChatSocketServer(io);
 attachNotificationWebSocketServer(httpServer);
 
 app.use(cors());

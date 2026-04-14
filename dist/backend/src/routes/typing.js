@@ -5,6 +5,7 @@ const store_1 = require("../data/store");
 const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const auth_1 = require("../utils/auth");
+const chatRealtimeService_1 = require("../services/chatRealtimeService");
 const router = (0, express_1.Router)({ mergeParams: true });
 const TYPING_TTL_MS = 5000;
 const getCurrentUser = async (headerValue) => {
@@ -54,28 +55,31 @@ const getTypingUsersMap = (spaceId) => {
     }
     return activeTypingUsers;
 };
+const listActiveTypingUsers = async (spaceId) => {
+    const typingUserIds = Array.from(getTypingUsersMap(spaceId).keys());
+    const usersById = await (0, auth_1.getUsersByIds)(typingUserIds);
+    return typingUserIds
+        .map((userId) => {
+        const typingUser = usersById.get(userId);
+        if (!typingUser) {
+            return null;
+        }
+        return {
+            userId: typingUser.id,
+            name: typingUser.name,
+        };
+    })
+        .filter((item) => item !== null);
+};
 router.get('/', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
         const user = await getCurrentUser(req.header('x-user-id'));
         await getSpaceById(spaceId);
         await requireMembership(spaceId, user.id);
-        const typingUserIds = Array.from(getTypingUsersMap(spaceId).keys());
-        const usersById = await (0, auth_1.getUsersByIds)(typingUserIds);
         const response = {
             data: {
-                users: typingUserIds
-                    .map((userId) => {
-                    const typingUser = usersById.get(userId);
-                    if (!typingUser) {
-                        return null;
-                    }
-                    return {
-                        userId: typingUser.id,
-                        name: typingUser.name,
-                    };
-                })
-                    .filter((item) => item !== null),
+                users: await listActiveTypingUsers(spaceId),
             },
         };
         res.json(response);
@@ -91,6 +95,10 @@ router.post('/start', async (req, res, next) => {
         await getSpaceById(spaceId);
         await requireMembership(spaceId, user.id);
         getTypingUsersMap(spaceId).set(user.id, Date.now());
+        (0, chatRealtimeService_1.emitTypingUpdate)({
+            spaceId,
+            users: await listActiveTypingUsers(spaceId),
+        });
         res.status(204).send();
     }
     catch (error) {
@@ -107,6 +115,10 @@ router.post('/stop', async (req, res, next) => {
         if (!store_1.typingUsers[spaceId] || store_1.typingUsers[spaceId].size === 0) {
             delete store_1.typingUsers[spaceId];
         }
+        (0, chatRealtimeService_1.emitTypingUpdate)({
+            spaceId,
+            users: await listActiveTypingUsers(spaceId),
+        });
         res.status(204).send();
     }
     catch (error) {
