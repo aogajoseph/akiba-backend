@@ -43,9 +43,17 @@ router.get('/', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
         const user = await getCurrentUser(req.header('x-user-id'));
+        const rawSince = typeof req.query.since === 'string' ? req.query.since.trim() : undefined;
+        let since;
+        if (rawSince) {
+            since = new Date(rawSince);
+            if (Number.isNaN(since.getTime())) {
+                throw (0, http_1.createHttpError)(400, 'since must be a valid ISO date string');
+            }
+        }
         const response = {
             data: {
-                messages: await (0, chatService_1.listMessages)(spaceId, user.id),
+                messages: await (0, chatService_1.listMessages)(spaceId, user.id, { since }),
             },
         };
         res.json(response);

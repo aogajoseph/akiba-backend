@@ -87,10 +87,21 @@ router.get('/', async (req: Request<GroupParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
+    const rawSince =
+      typeof req.query.since === 'string' ? req.query.since.trim() : undefined;
+    let since: Date | undefined;
+
+    if (rawSince) {
+      since = new Date(rawSince);
+
+      if (Number.isNaN(since.getTime())) {
+        throw createHttpError(400, 'since must be a valid ISO date string');
+      }
+    }
 
     const response: ApiResponse<ListMessagesResponseDto> = {
       data: {
-        messages: await listMessages(spaceId, user.id),
+        messages: await listMessages(spaceId, user.id, { since }),
       },
     };
 

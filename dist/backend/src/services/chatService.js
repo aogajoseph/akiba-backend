@@ -110,11 +110,18 @@ const getMessageByIdOrThrow = async (spaceId, messageId) => {
     }
     return message;
 };
-const listMessages = async (spaceId, userId) => {
+const listMessages = async (spaceId, userId, options) => {
     await ensureSpaceMembership(spaceId, userId);
     const messages = await prisma_1.prisma.message.findMany({
         where: {
             spaceId,
+            ...(options?.since
+                ? {
+                    createdAt: {
+                        gte: options.since,
+                    },
+                }
+                : {}),
         },
         include: {
             attachments: {

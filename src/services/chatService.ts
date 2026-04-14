@@ -154,12 +154,22 @@ const getMessageByIdOrThrow = async (spaceId: string, messageId: string) => {
 export const listMessages = async (
   spaceId: string,
   userId: string,
+  options?: {
+    since?: Date;
+  },
 ): Promise<ContractMessage[]> => {
   await ensureSpaceMembership(spaceId, userId);
 
   const messages = await prisma.message.findMany({
     where: {
       spaceId,
+      ...(options?.since
+        ? {
+            createdAt: {
+              gte: options.since,
+            },
+          }
+        : {}),
     },
     include: {
       attachments: {
