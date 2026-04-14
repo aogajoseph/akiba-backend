@@ -4,6 +4,24 @@ exports.deleteMessage = exports.toggleMessageReaction = exports.createMessage = 
 const prisma_1 = require("../lib/prisma");
 const chatRealtimeService_1 = require("./chatRealtimeService");
 const http_1 = require("../utils/http");
+const normalizeMessageMedia = (media) => {
+    if (!media?.length) {
+        return undefined;
+    }
+    return media.map((item) => {
+        const normalizedUrl = item.url.trim();
+        if (!normalizedUrl) {
+            throw (0, http_1.createHttpError)(400, 'Media URL is required');
+        }
+        if (item.type !== 'image' && item.type !== 'video') {
+            throw (0, http_1.createHttpError)(400, 'Media type must be image or video');
+        }
+        return {
+            type: item.type,
+            url: normalizedUrl,
+        };
+    });
+};
 const ensureSpaceMembership = async (spaceId, userId) => {
     const [space, membership] = await Promise.all([
         prisma_1.prisma.space.findUnique({
@@ -125,6 +143,7 @@ exports.listMessages = listMessages;
 const createMessage = async (input) => {
     await ensureSpaceMembership(input.spaceId, input.userId);
     await ensureReplyTargetInSpace(input.spaceId, input.replyToMessageId);
+    const normalizedMedia = normalizeMessageMedia(input.media);
     const createdMessage = await prisma_1.prisma.message.create({
         data: {
             spaceId: input.spaceId,
@@ -132,9 +151,9 @@ const createMessage = async (input) => {
             text: input.text ?? '',
             replyToId: input.replyToMessageId,
             status: 'sent',
-            attachments: input.media?.length
+            attachments: normalizedMedia?.length
                 ? {
-                    create: input.media.map((item) => ({
+                    create: normalizedMedia.map((item) => ({
                         type: item.type,
                         url: item.url,
                     })),

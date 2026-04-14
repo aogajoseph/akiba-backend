@@ -13,6 +13,32 @@ const getCurrentUser = async (headerValue) => {
 const getSpaceId = (params) => {
     return (0, http_1.ensureNonEmptyString)(params.spaceId ?? params.groupId, 'spaceId is required');
 };
+const ensureOptionalHttpUrlString = (value, fieldName) => {
+    if (!value) {
+        return undefined;
+    }
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(value);
+    }
+    catch {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be a valid URL`);
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be an http or https URL`);
+    }
+    return parsedUrl.toString();
+};
+const inferMediaTypeFromUrl = (mediaUrl) => {
+    const normalizedUrl = mediaUrl.toLowerCase();
+    if (normalizedUrl.includes('.mp4') ||
+        normalizedUrl.includes('.mov') ||
+        normalizedUrl.includes('.webm') ||
+        normalizedUrl.includes('/video/upload/')) {
+        return 'video';
+    }
+    return 'image';
+};
 router.get('/', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
@@ -60,7 +86,23 @@ router.post('/media', async (req, res, next) => {
         const { fields, files } = await (0, media_1.parseMultipartFormData)(req);
         const text = (0, http_1.ensureOptionalNonEmptyString)(fields.text, 'text must be a non-empty string');
         const replyToMessageId = (0, http_1.ensureOptionalNonEmptyString)(fields.replyToMessageId, 'replyToMessageId must be a non-empty string');
-        const media = await (0, media_1.storeMediaFiles)(req, files.filter((file) => file.fieldName === 'file'));
+        const mediaUrl = ensureOptionalHttpUrlString((0, http_1.ensureOptionalNonEmptyString)(fields.mediaUrl, 'mediaUrl must be a non-empty string'), 'mediaUrl');
+        const mediaTypeField = (0, http_1.ensureOptionalNonEmptyString)(fields.mediaType, 'mediaType must be a non-empty string');
+        const uploadedFiles = files.filter((file) => file.fieldName === 'file');
+        const media = uploadedFiles.length > 0
+            ? await (0, media_1.storeMediaFiles)(req, uploadedFiles)
+            : mediaUrl
+                ? [
+                    {
+                        type: mediaTypeField === 'image' || mediaTypeField === 'video'
+                            ? mediaTypeField
+                            : inferMediaTypeFromUrl(mediaUrl),
+                        url: mediaUrl,
+                    },
+                ]
+                : (() => {
+                    throw (0, http_1.createHttpError)(400, 'At least one media file or mediaUrl is required');
+                })();
         const response = {
             data: {
                 message: await (0, chatService_1.createMessage)({

@@ -15,6 +15,7 @@ import {
   ensureNonEmptyString,
   ensureOptionalNonEmptyString,
   getObjectBody,
+  createHttpError,
 } from '../utils/http';
 import { getCurrentUserOrThrow } from '../utils/auth';
 import { parseMultipartFormData, storeMediaFiles } from '../utils/media';
@@ -45,6 +46,41 @@ const getCurrentUser = async (headerValue: string | undefined): Promise<User> =>
 
 const getSpaceId = (params: Record<string, string | undefined>): string => {
   return ensureNonEmptyString(params.spaceId ?? params.groupId, 'spaceId is required');
+};
+
+const ensureOptionalHttpUrlString = (value: string | undefined, fieldName: string): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(value);
+  } catch {
+    throw createHttpError(400, `${fieldName} must be a valid URL`);
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw createHttpError(400, `${fieldName} must be an http or https URL`);
+  }
+
+  return parsedUrl.toString();
+};
+
+const inferMediaTypeFromUrl = (mediaUrl: string): 'image' | 'video' => {
+  const normalizedUrl = mediaUrl.toLowerCase();
+
+  if (
+    normalizedUrl.includes('.mp4') ||
+    normalizedUrl.includes('.mov') ||
+    normalizedUrl.includes('.webm') ||
+    normalizedUrl.includes('/video/upload/')
+  ) {
+    return 'video';
+  }
+
+  return 'image';
 };
 
 router.get('/', async (req: Request<GroupParams>, res, next) => {
@@ -105,8 +141,31 @@ router.post('/media', async (req: Request<GroupParams>, res, next) => {
       fields.replyToMessageId,
       'replyToMessageId must be a non-empty string',
     );
-
-    const media = await storeMediaFiles(req, files.filter((file) => file.fieldName === 'file'));
+    const mediaUrl = ensureOptionalHttpUrlString(
+      ensureOptionalNonEmptyString(fields.mediaUrl, 'mediaUrl must be a non-empty string'),
+      'mediaUrl',
+    );
+    const mediaTypeField = ensureOptionalNonEmptyString(
+      fields.mediaType,
+      'mediaType must be a non-empty string',
+    );
+    const uploadedFiles = files.filter((file) => file.fieldName === 'file');
+    const media =
+      uploadedFiles.length > 0
+        ? await storeMediaFiles(req, uploadedFiles)
+        : mediaUrl
+          ? [
+              {
+                type:
+                  mediaTypeField === 'image' || mediaTypeField === 'video'
+                    ? mediaTypeField
+                    : inferMediaTypeFromUrl(mediaUrl),
+                url: mediaUrl,
+              },
+            ]
+          : (() => {
+              throw createHttpError(400, 'At least one media file or mediaUrl is required');
+            })();
 
     const response: ApiResponse<UploadMediaMessageResponseDto> = {
       data: {
