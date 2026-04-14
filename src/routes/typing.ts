@@ -11,6 +11,7 @@ import { createHttpError, ensureNonEmptyString } from '../utils/http';
 import { getCurrentUserOrThrow, getUsersByIds } from '../utils/auth';
 
 const router = Router({ mergeParams: true });
+const TYPING_TTL_MS = 5_000;
 
 type TypingParams = {
   groupId?: string;
@@ -55,12 +56,26 @@ const requireMembership = async (spaceId: string, userId: string) => {
   return membership;
 };
 
-const getTypingSet = (spaceId: string): Set<string> => {
+const getTypingUsersMap = (spaceId: string): Map<string, number> => {
   if (!typingUsers[spaceId]) {
-    typingUsers[spaceId] = new Set<string>();
+    typingUsers[spaceId] = new Map<string, number>();
   }
 
-  return typingUsers[spaceId];
+  const activeTypingUsers = typingUsers[spaceId];
+  const now = Date.now();
+
+  for (const [userId, lastSeenAt] of activeTypingUsers.entries()) {
+    if (now - lastSeenAt > TYPING_TTL_MS) {
+      activeTypingUsers.delete(userId);
+    }
+  }
+
+  if (activeTypingUsers.size === 0) {
+    delete typingUsers[spaceId];
+    return new Map<string, number>();
+  }
+
+  return activeTypingUsers;
 };
 
 router.get('/', async (req: Request<TypingParams>, res, next) => {
@@ -69,7 +84,7 @@ router.get('/', async (req: Request<TypingParams>, res, next) => {
     const user = await getCurrentUser(req.header('x-user-id'));
     await getSpaceById(spaceId);
     await requireMembership(spaceId, user.id);
-    const typingUserIds = Array.from(getTypingSet(spaceId));
+    const typingUserIds = Array.from(getTypingUsersMap(spaceId).keys());
     const usersById = await getUsersByIds(typingUserIds);
 
     const response: ApiResponse<ListTypingUsersResponseDto> = {
@@ -104,7 +119,7 @@ router.post('/start', async (req: Request<TypingParams>, res, next) => {
     await getSpaceById(spaceId);
     await requireMembership(spaceId, user.id);
 
-    getTypingSet(spaceId).add(user.id);
+    getTypingUsersMap(spaceId).set(user.id, Date.now());
 
     res.status(204).send();
   } catch (error) {
@@ -119,9 +134,9 @@ router.post('/stop', async (req: Request<TypingParams>, res, next) => {
     await getSpaceById(spaceId);
     await requireMembership(spaceId, user.id);
 
-    typingUsers[spaceId]?.delete(user.id);
+    getTypingUsersMap(spaceId).delete(user.id);
 
-    if (typingUsers[spaceId]?.size === 0) {
+    if (!typingUsers[spaceId] || typingUsers[spaceId].size === 0) {
       delete typingUsers[spaceId];
     }
 

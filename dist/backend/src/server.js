@@ -19,6 +19,7 @@ const payments_1 = __importDefault(require("./routes/payments"));
 const typing_1 = __importDefault(require("./routes/typing"));
 const transactions_1 = __importDefault(require("./routes/transactions"));
 const users_1 = __importDefault(require("./routes/users"));
+const prisma_1 = require("./lib/prisma");
 const notificationRealtimeService_1 = require("./services/notificationRealtimeService");
 const http_2 = require("./utils/http");
 dotenv_1.default.config();
@@ -65,10 +66,19 @@ const removeSocketPresence = (socketId) => {
     emitPresenceUpdate(presence.spaceId);
 };
 io.on('connection', (socket) => {
-    socket.on('join_space', (payload) => {
+    socket.on('join_space', async (payload) => {
         const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId.trim() : '';
         const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
         if (!spaceId || !userId) {
+            return;
+        }
+        const membership = await prisma_1.prisma.spaceMember.findFirst({
+            where: {
+                spaceId,
+                userId,
+            },
+        });
+        if (!membership) {
             return;
         }
         const previousPresence = socketPresence.get(socket.id);

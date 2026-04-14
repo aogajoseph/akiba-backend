@@ -6,6 +6,7 @@ const prisma_1 = require("../lib/prisma");
 const http_1 = require("../utils/http");
 const auth_1 = require("../utils/auth");
 const router = (0, express_1.Router)({ mergeParams: true });
+const TYPING_TTL_MS = 5000;
 const getCurrentUser = async (headerValue) => {
     const userId = (0, http_1.ensureNonEmptyString)(headerValue, 'x-user-id header is required');
     return (0, auth_1.getCurrentUserOrThrow)(userId);
@@ -36,11 +37,22 @@ const requireMembership = async (spaceId, userId) => {
     }
     return membership;
 };
-const getTypingSet = (spaceId) => {
+const getTypingUsersMap = (spaceId) => {
     if (!store_1.typingUsers[spaceId]) {
-        store_1.typingUsers[spaceId] = new Set();
+        store_1.typingUsers[spaceId] = new Map();
     }
-    return store_1.typingUsers[spaceId];
+    const activeTypingUsers = store_1.typingUsers[spaceId];
+    const now = Date.now();
+    for (const [userId, lastSeenAt] of activeTypingUsers.entries()) {
+        if (now - lastSeenAt > TYPING_TTL_MS) {
+            activeTypingUsers.delete(userId);
+        }
+    }
+    if (activeTypingUsers.size === 0) {
+        delete store_1.typingUsers[spaceId];
+        return new Map();
+    }
+    return activeTypingUsers;
 };
 router.get('/', async (req, res, next) => {
     try {
@@ -48,7 +60,7 @@ router.get('/', async (req, res, next) => {
         const user = await getCurrentUser(req.header('x-user-id'));
         await getSpaceById(spaceId);
         await requireMembership(spaceId, user.id);
-        const typingUserIds = Array.from(getTypingSet(spaceId));
+        const typingUserIds = Array.from(getTypingUsersMap(spaceId).keys());
         const usersById = await (0, auth_1.getUsersByIds)(typingUserIds);
         const response = {
             data: {
@@ -78,7 +90,7 @@ router.post('/start', async (req, res, next) => {
         const user = await getCurrentUser(req.header('x-user-id'));
         await getSpaceById(spaceId);
         await requireMembership(spaceId, user.id);
-        getTypingSet(spaceId).add(user.id);
+        getTypingUsersMap(spaceId).set(user.id, Date.now());
         res.status(204).send();
     }
     catch (error) {
@@ -91,8 +103,8 @@ router.post('/stop', async (req, res, next) => {
         const user = await getCurrentUser(req.header('x-user-id'));
         await getSpaceById(spaceId);
         await requireMembership(spaceId, user.id);
-        store_1.typingUsers[spaceId]?.delete(user.id);
-        if (store_1.typingUsers[spaceId]?.size === 0) {
+        getTypingUsersMap(spaceId).delete(user.id);
+        if (!store_1.typingUsers[spaceId] || store_1.typingUsers[spaceId].size === 0) {
             delete store_1.typingUsers[spaceId];
         }
         res.status(204).send();

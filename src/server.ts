@@ -15,6 +15,7 @@ import paymentsRouter from './routes/payments';
 import typingRouter from './routes/typing';
 import transactionsRouter from './routes/transactions';
 import usersRouter from './routes/users';
+import { prisma } from './lib/prisma';
 import { attachNotificationWebSocketServer } from './services/notificationRealtimeService';
 import { errorHandler } from './utils/http';
 
@@ -74,13 +75,24 @@ const removeSocketPresence = (socketId: string): void => {
 };
 
 io.on('connection', (socket) => {
-  socket.on('join_space', (payload: { spaceId?: string; userId?: string }) => {
+  socket.on('join_space', async (payload: { spaceId?: string; userId?: string }) => {
     const spaceId =
       typeof payload?.spaceId === 'string' ? payload.spaceId.trim() : '';
     const userId =
       typeof payload?.userId === 'string' ? payload.userId.trim() : '';
 
     if (!spaceId || !userId) {
+      return;
+    }
+
+    const membership = await prisma.spaceMember.findFirst({
+      where: {
+        spaceId,
+        userId,
+      },
+    });
+
+    if (!membership) {
       return;
     }
 
