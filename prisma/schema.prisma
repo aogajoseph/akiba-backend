@@ -57,6 +57,8 @@ model User {
   spaces              SpaceMember[]
   transactions        Transaction[]
   withdrawalApprovals WithdrawalApproval[]
+  messages            Message[]
+  messageReactions    MessageReaction[]
   notificationsAuthored  Notification[]          @relation("NotificationActor")
   notificationRecipients NotificationRecipient[] @relation("NotificationRecipient")
   devices             Device[]
@@ -80,6 +82,7 @@ model Space {
 
   members      SpaceMember[]
   transactions Transaction[]
+  messages     Message[]
 }
 
 model SpaceMember {
@@ -151,6 +154,54 @@ model NotificationRecipient {
 
   @@unique([notificationId, userId])
   @@index([userId, isRead, createdAt])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  spaceId    String
+  userId     String
+  text       String   @default("")
+  replyToId  String?
+  status     String   @default("sent")
+  createdAt  DateTime @default(now())
+
+  space       Space               @relation(fields: [spaceId], references: [id])
+  user        User                @relation(fields: [userId], references: [id])
+  replyTo     Message?            @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies     Message[]           @relation("MessageReplies")
+  attachments MessageAttachment[]
+  reactions   MessageReaction[]
+
+  @@index([spaceId, createdAt])
+  @@index([userId, createdAt])
+  @@index([replyToId])
+}
+
+model MessageAttachment {
+  id        String   @id @default(uuid())
+  messageId String
+  type      String
+  url       String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+
+  @@index([messageId, createdAt])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model Device {

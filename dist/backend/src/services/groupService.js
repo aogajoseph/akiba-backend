@@ -1709,7 +1709,7 @@ const deleteGroup = async (groupId, requesterUserId) => {
         if (space.createdById !== requesterUserId) {
             throw (0, http_1.createHttpError)(403, 'Only the creator can delete this space');
         }
-        const [activeWithdrawalCount, completedDeposits, pendingWithdrawals, completedWithdrawals, transactionRecords, notificationsForSpace, memberRecords,] = await Promise.all([
+        const [activeWithdrawalCount, completedDeposits, pendingWithdrawals, completedWithdrawals, transactionRecords, notificationsForSpace, memberRecords, chatMessageRecords,] = await Promise.all([
             tx.transaction.count({
                 where: {
                     spaceId: groupId,
@@ -1775,6 +1775,14 @@ const deleteGroup = async (groupId, requesterUserId) => {
                     userId: true,
                 },
             }),
+            tx.message.findMany({
+                where: {
+                    spaceId: groupId,
+                },
+                select: {
+                    id: true,
+                },
+            }),
         ]);
         if (activeWithdrawalCount > 0) {
             throw (0, http_1.createHttpError)(400, 'Cannot delete space with pending withdrawals');
@@ -1790,6 +1798,7 @@ const deleteGroup = async (groupId, requesterUserId) => {
         }
         const transactionIds = transactionRecords.map((transaction) => transaction.id);
         const notificationIds = notificationsForSpace.map((notification) => notification.id);
+        const chatMessageIds = chatMessageRecords.map((message) => message.id);
         if (notificationIds.length > 0) {
             await tx.notificationRecipient.deleteMany({
                 where: {
@@ -1808,7 +1817,28 @@ const deleteGroup = async (groupId, requesterUserId) => {
                 },
             });
         }
+        if (chatMessageIds.length > 0) {
+            await tx.messageReaction.deleteMany({
+                where: {
+                    messageId: {
+                        in: chatMessageIds,
+                    },
+                },
+            });
+            await tx.messageAttachment.deleteMany({
+                where: {
+                    messageId: {
+                        in: chatMessageIds,
+                    },
+                },
+            });
+        }
         await tx.notification.deleteMany({
+            where: {
+                spaceId: groupId,
+            },
+        });
+        await tx.message.deleteMany({
             where: {
                 spaceId: groupId,
             },

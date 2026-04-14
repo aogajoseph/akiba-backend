@@ -16,7 +16,7 @@ import {
 } from '../../../shared/contracts';
 import { normalizePhoneNumber } from '../../../shared/phone';
 import { NotificationType, type Prisma } from '@prisma/client';
-import { approvals, groupMembers, groups, messages, transactions } from '../data/store';
+import { approvals, groupMembers, groups, transactions } from '../data/store';
 import { createHttpError, createId } from '../utils/http';
 import { prisma } from '../lib/prisma';
 import { getUsersByIds } from '../utils/auth';
@@ -2248,6 +2248,7 @@ export const deleteGroup = async (
       transactionRecords,
       notificationsForSpace,
       memberRecords,
+      chatMessageRecords,
     ] = await Promise.all([
       tx.transaction.count({
         where: {
@@ -2314,6 +2315,14 @@ export const deleteGroup = async (
           userId: true,
         },
       }),
+      tx.message.findMany({
+        where: {
+          spaceId: groupId,
+        },
+        select: {
+          id: true,
+        },
+      }),
     ]);
 
     if (activeWithdrawalCount > 0) {
@@ -2335,6 +2344,7 @@ export const deleteGroup = async (
 
     const transactionIds = transactionRecords.map((transaction) => transaction.id);
     const notificationIds = notificationsForSpace.map((notification) => notification.id);
+    const chatMessageIds = chatMessageRecords.map((message) => message.id);
 
     if (notificationIds.length > 0) {
       await tx.notificationRecipient.deleteMany({
@@ -2356,7 +2366,30 @@ export const deleteGroup = async (
       });
     }
 
+    if (chatMessageIds.length > 0) {
+      await tx.messageReaction.deleteMany({
+        where: {
+          messageId: {
+            in: chatMessageIds,
+          },
+        },
+      });
+
+      await tx.messageAttachment.deleteMany({
+        where: {
+          messageId: {
+            in: chatMessageIds,
+          },
+        },
+      });
+    }
+
     await tx.notification.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
+    await tx.message.deleteMany({
       where: {
         spaceId: groupId,
       },
