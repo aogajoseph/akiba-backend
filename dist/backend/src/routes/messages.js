@@ -43,8 +43,17 @@ router.get('/', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);
         const user = await getCurrentUser(req.header('x-user-id'));
+        const rawCursor = typeof req.query.cursor === 'string' ? req.query.cursor.trim() : undefined;
+        const rawLimit = typeof req.query.limit === 'string' ? req.query.limit.trim() : undefined;
         const rawSince = typeof req.query.since === 'string' ? req.query.since.trim() : undefined;
+        let limit;
         let since;
+        if (rawLimit) {
+            limit = Number(rawLimit);
+            if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1) {
+                throw (0, http_1.createHttpError)(400, 'limit must be a positive integer');
+            }
+        }
         if (rawSince) {
             since = new Date(rawSince);
             if (Number.isNaN(since.getTime())) {
@@ -52,9 +61,11 @@ router.get('/', async (req, res, next) => {
             }
         }
         const response = {
-            data: {
-                messages: await (0, chatService_1.listMessages)(spaceId, user.id, { since }),
-            },
+            data: await (0, chatService_1.listMessages)(spaceId, user.id, {
+                cursor: rawCursor,
+                limit,
+                since,
+            }),
         };
         res.json(response);
     }

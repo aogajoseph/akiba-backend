@@ -112,9 +112,41 @@ const getMessageByIdOrThrow = async (spaceId, messageId) => {
 };
 const listMessages = async (spaceId, userId, options) => {
     await ensureSpaceMembership(spaceId, userId);
+    const normalizedLimit = Math.min(Math.max(options?.limit ?? 20, 1), 50);
+    const shouldPaginate = !options?.since || Boolean(options?.cursor);
+    let cursorMessage = null;
+    if (options?.cursor) {
+        cursorMessage = await prisma_1.prisma.message.findFirst({
+            where: {
+                id: options.cursor,
+                spaceId,
+            },
+            select: {
+                createdAt: true,
+                id: true,
+            },
+        });
+    }
     const messages = await prisma_1.prisma.message.findMany({
         where: {
             spaceId,
+            ...(cursorMessage
+                ? {
+                    OR: [
+                        {
+                            createdAt: {
+                                lt: cursorMessage.createdAt,
+                            },
+                        },
+                        {
+                            createdAt: cursorMessage.createdAt,
+                            id: {
+                                lt: cursorMessage.id,
+                            },
+                        },
+                    ],
+                }
+                : {}),
             ...(options?.since
                 ? {
                     createdAt: {
@@ -137,14 +169,24 @@ const listMessages = async (spaceId, userId, options) => {
         },
         orderBy: [
             {
-                createdAt: 'asc',
+                createdAt: 'desc',
             },
             {
-                id: 'asc',
+                id: 'desc',
             },
         ],
+        ...(shouldPaginate
+            ? {
+                take: normalizedLimit + 1,
+            }
+            : {}),
     });
-    return messages.map(mapDbMessageToContractMessage);
+    const hasNext = shouldPaginate && messages.length > normalizedLimit;
+    const pageItems = hasNext ? messages.slice(0, normalizedLimit) : messages;
+    return {
+        messages: pageItems.map(mapDbMessageToContractMessage),
+        nextCursor: hasNext ? pageItems[pageItems.length - 1]?.id : undefined,
+    };
 };
 exports.listMessages = listMessages;
 const createMessage = async (input) => {

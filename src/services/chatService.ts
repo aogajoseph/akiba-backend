@@ -155,14 +155,55 @@ export const listMessages = async (
   spaceId: string,
   userId: string,
   options?: {
+    cursor?: string;
+    limit?: number;
     since?: Date;
   },
-): Promise<ContractMessage[]> => {
+): Promise<{ messages: ContractMessage[]; nextCursor?: string }> => {
   await ensureSpaceMembership(spaceId, userId);
+
+  const normalizedLimit = Math.min(Math.max(options?.limit ?? 20, 1), 50);
+  const shouldPaginate = !options?.since || Boolean(options?.cursor);
+  let cursorMessage:
+    | {
+        createdAt: Date;
+        id: string;
+      }
+    | null = null;
+
+  if (options?.cursor) {
+    cursorMessage = await prisma.message.findFirst({
+      where: {
+        id: options.cursor,
+        spaceId,
+      },
+      select: {
+        createdAt: true,
+        id: true,
+      },
+    });
+  }
 
   const messages = await prisma.message.findMany({
     where: {
       spaceId,
+      ...(cursorMessage
+        ? {
+            OR: [
+              {
+                createdAt: {
+                  lt: cursorMessage.createdAt,
+                },
+              },
+              {
+                createdAt: cursorMessage.createdAt,
+                id: {
+                  lt: cursorMessage.id,
+                },
+              },
+            ],
+          }
+        : {}),
       ...(options?.since
         ? {
             createdAt: {
@@ -185,15 +226,26 @@ export const listMessages = async (
     },
     orderBy: [
       {
-        createdAt: 'asc',
+        createdAt: 'desc',
       },
       {
-        id: 'asc',
+        id: 'desc',
       },
     ],
+    ...(shouldPaginate
+      ? {
+          take: normalizedLimit + 1,
+        }
+      : {}),
   });
 
-  return messages.map(mapDbMessageToContractMessage);
+  const hasNext = shouldPaginate && messages.length > normalizedLimit;
+  const pageItems = hasNext ? messages.slice(0, normalizedLimit) : messages;
+
+  return {
+    messages: pageItems.map(mapDbMessageToContractMessage),
+    nextCursor: hasNext ? pageItems[pageItems.length - 1]?.id : undefined,
+  };
 };
 
 export const createMessage = async (input: {

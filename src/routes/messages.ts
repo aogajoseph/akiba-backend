@@ -87,9 +87,22 @@ router.get('/', async (req: Request<GroupParams>, res, next) => {
   try {
     const spaceId = getSpaceId(req.params);
     const user = await getCurrentUser(req.header('x-user-id'));
+    const rawCursor =
+      typeof req.query.cursor === 'string' ? req.query.cursor.trim() : undefined;
+    const rawLimit =
+      typeof req.query.limit === 'string' ? req.query.limit.trim() : undefined;
     const rawSince =
       typeof req.query.since === 'string' ? req.query.since.trim() : undefined;
+    let limit: number | undefined;
     let since: Date | undefined;
+
+    if (rawLimit) {
+      limit = Number(rawLimit);
+
+      if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1) {
+        throw createHttpError(400, 'limit must be a positive integer');
+      }
+    }
 
     if (rawSince) {
       since = new Date(rawSince);
@@ -100,9 +113,11 @@ router.get('/', async (req: Request<GroupParams>, res, next) => {
     }
 
     const response: ApiResponse<ListMessagesResponseDto> = {
-      data: {
-        messages: await listMessages(spaceId, user.id, { since }),
-      },
+      data: await listMessages(spaceId, user.id, {
+        cursor: rawCursor,
+        limit,
+        since,
+      }),
     };
 
     res.json(response);
