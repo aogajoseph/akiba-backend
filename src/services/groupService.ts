@@ -2404,6 +2404,11 @@ export const deleteGroup = async (
         spaceId: groupId,
       },
     });
+    await tx.spaceReadState.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
     await tx.webhookEvent.deleteMany({
       where: {
         spaceId: groupId,

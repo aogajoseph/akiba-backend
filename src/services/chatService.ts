@@ -78,6 +78,53 @@ const ensureReplyTargetInSpace = async (
   }
 };
 
+const getSpaceReadState = async (
+  spaceId: string,
+  userId: string,
+): Promise<Date | null> => {
+  const existing = await prisma.spaceReadState.findUnique({
+    where: {
+      userId_spaceId: {
+        userId,
+        spaceId,
+      },
+    },
+    select: {
+      lastReadAt: true,
+    },
+  });
+
+  return existing?.lastReadAt ?? null;
+};
+
+const upsertSpaceReadState = async (
+  spaceId: string,
+  userId: string,
+  latestVisibleMessageTimestamp: Date,
+): Promise<Date> => {
+  const readState = await prisma.spaceReadState.upsert({
+    where: {
+      userId_spaceId: {
+        userId,
+        spaceId,
+      },
+    },
+    create: {
+      userId,
+      spaceId,
+      lastReadAt: latestVisibleMessageTimestamp,
+    },
+    update: {
+      lastReadAt: latestVisibleMessageTimestamp,
+    },
+    select: {
+      lastReadAt: true,
+    },
+  });
+
+  return readState.lastReadAt;
+};
+
 const mapDbMessageToContractMessage = (message: {
   attachments: Array<{
     type: string;
@@ -159,7 +206,7 @@ export const listMessages = async (
     limit?: number;
     since?: Date;
   },
-): Promise<{ messages: ContractMessage[]; nextCursor?: string }> => {
+): Promise<{ lastReadAt?: string; messages: ContractMessage[]; nextCursor?: string }> => {
   await ensureSpaceMembership(spaceId, userId);
 
   const normalizedLimit = Math.min(Math.max(options?.limit ?? 20, 1), 50);
@@ -241,10 +288,42 @@ export const listMessages = async (
 
   const hasNext = shouldPaginate && messages.length > normalizedLimit;
   const pageItems = hasNext ? messages.slice(0, normalizedLimit) : messages;
+  const lastReadAt = await getSpaceReadState(spaceId, userId);
 
   return {
+    lastReadAt: lastReadAt?.toISOString(),
     messages: pageItems.map(mapDbMessageToContractMessage),
     nextCursor: hasNext ? pageItems[pageItems.length - 1]?.id : undefined,
+  };
+};
+
+export const markMessagesRead = async (input: {
+  latestVisibleMessageTimestamp: Date;
+  spaceId: string;
+  userId: string;
+}): Promise<{ lastReadAt: string; success: true }> => {
+  await ensureSpaceMembership(input.spaceId, input.userId);
+  const currentLastReadAt = await getSpaceReadState(input.spaceId, input.userId);
+
+  if (
+    currentLastReadAt &&
+    input.latestVisibleMessageTimestamp.getTime() <= currentLastReadAt.getTime()
+  ) {
+    return {
+      lastReadAt: currentLastReadAt.toISOString(),
+      success: true,
+    };
+  }
+
+  const nextReadAt = await upsertSpaceReadState(
+    input.spaceId,
+    input.userId,
+    input.latestVisibleMessageTimestamp,
+  );
+
+  return {
+    lastReadAt: nextReadAt.toISOString(),
+    success: true,
   };
 };
 

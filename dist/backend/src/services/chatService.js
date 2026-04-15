@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteMessage = exports.toggleMessageReaction = exports.createMessage = exports.listMessages = void 0;
+exports.deleteMessage = exports.toggleMessageReaction = exports.createMessage = exports.markMessagesRead = exports.listMessages = void 0;
 const prisma_1 = require("../lib/prisma");
 const chatRealtimeService_1 = require("./chatRealtimeService");
 const http_1 = require("../utils/http");
@@ -59,6 +59,42 @@ const ensureReplyTargetInSpace = async (spaceId, replyToMessageId, tx = prisma_1
     if (!replyTarget) {
         throw (0, http_1.createHttpError)(404, 'Reply target message not found');
     }
+};
+const getSpaceReadState = async (spaceId, userId) => {
+    const existing = await prisma_1.prisma.spaceReadState.findUnique({
+        where: {
+            userId_spaceId: {
+                userId,
+                spaceId,
+            },
+        },
+        select: {
+            lastReadAt: true,
+        },
+    });
+    return existing?.lastReadAt ?? null;
+};
+const upsertSpaceReadState = async (spaceId, userId, latestVisibleMessageTimestamp) => {
+    const readState = await prisma_1.prisma.spaceReadState.upsert({
+        where: {
+            userId_spaceId: {
+                userId,
+                spaceId,
+            },
+        },
+        create: {
+            userId,
+            spaceId,
+            lastReadAt: latestVisibleMessageTimestamp,
+        },
+        update: {
+            lastReadAt: latestVisibleMessageTimestamp,
+        },
+        select: {
+            lastReadAt: true,
+        },
+    });
+    return readState.lastReadAt;
 };
 const mapDbMessageToContractMessage = (message) => {
     const reactionsByEmoji = new Map();
@@ -183,12 +219,31 @@ const listMessages = async (spaceId, userId, options) => {
     });
     const hasNext = shouldPaginate && messages.length > normalizedLimit;
     const pageItems = hasNext ? messages.slice(0, normalizedLimit) : messages;
+    const lastReadAt = await getSpaceReadState(spaceId, userId);
     return {
+        lastReadAt: lastReadAt?.toISOString(),
         messages: pageItems.map(mapDbMessageToContractMessage),
         nextCursor: hasNext ? pageItems[pageItems.length - 1]?.id : undefined,
     };
 };
 exports.listMessages = listMessages;
+const markMessagesRead = async (input) => {
+    await ensureSpaceMembership(input.spaceId, input.userId);
+    const currentLastReadAt = await getSpaceReadState(input.spaceId, input.userId);
+    if (currentLastReadAt &&
+        input.latestVisibleMessageTimestamp.getTime() <= currentLastReadAt.getTime()) {
+        return {
+            lastReadAt: currentLastReadAt.toISOString(),
+            success: true,
+        };
+    }
+    const nextReadAt = await upsertSpaceReadState(input.spaceId, input.userId, input.latestVisibleMessageTimestamp);
+    return {
+        lastReadAt: nextReadAt.toISOString(),
+        success: true,
+    };
+};
+exports.markMessagesRead = markMessagesRead;
 const createMessage = async (input) => {
     await ensureSpaceMembership(input.spaceId, input.userId);
     await ensureReplyTargetInSpace(input.spaceId, input.replyToMessageId);

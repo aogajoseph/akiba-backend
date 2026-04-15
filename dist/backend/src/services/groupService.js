@@ -1853,6 +1853,11 @@ const deleteGroup = async (groupId, requesterUserId) => {
                 spaceId: groupId,
             },
         });
+        await tx.spaceReadState.deleteMany({
+            where: {
+                spaceId: groupId,
+            },
+        });
         await tx.webhookEvent.deleteMany({
             where: {
                 spaceId: groupId,

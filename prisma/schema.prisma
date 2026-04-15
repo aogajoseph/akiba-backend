@@ -59,6 +59,7 @@ model User {
   withdrawalApprovals WithdrawalApproval[]
   messages            Message[]
   messageReactions    MessageReaction[]
+  spaceReadStates     SpaceReadState[]
   notificationsAuthored  Notification[]          @relation("NotificationActor")
   notificationRecipients NotificationRecipient[] @relation("NotificationRecipient")
   devices             Device[]
@@ -81,6 +82,7 @@ model Space {
   createdById       String
 
   members      SpaceMember[]
+  readStates   SpaceReadState[]
   transactions Transaction[]
   messages     Message[]
 }
@@ -202,6 +204,22 @@ model MessageReaction {
   @@unique([messageId, userId, emoji])
   @@index([messageId, createdAt])
   @@index([userId, createdAt])
+}
+
+model SpaceReadState {
+  id         String   @id @default(uuid())
+  userId     String
+  spaceId    String
+  lastReadAt DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id])
+  space Space @relation(fields: [spaceId], references: [id])
+
+  @@unique([userId, spaceId])
+  @@index([spaceId, lastReadAt])
+  @@index([userId, lastReadAt])
 }
 
 model Device {

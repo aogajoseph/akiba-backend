@@ -98,6 +98,29 @@ router.post('/', async (req, res, next) => {
         next(error);
     }
 });
+router.post('/read', async (req, res, next) => {
+    try {
+        const spaceId = getSpaceId(req.params);
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const body = (0, http_1.getObjectBody)(req.body);
+        const rawLatestVisibleMessageTimestamp = (0, http_1.ensureNonEmptyString)(body.latestVisibleMessageTimestamp, 'latestVisibleMessageTimestamp is required');
+        const latestVisibleMessageTimestamp = new Date(rawLatestVisibleMessageTimestamp);
+        if (Number.isNaN(latestVisibleMessageTimestamp.getTime())) {
+            throw (0, http_1.createHttpError)(400, 'latestVisibleMessageTimestamp must be a valid ISO date string');
+        }
+        const response = {
+            data: await (0, chatService_1.markMessagesRead)({
+                latestVisibleMessageTimestamp,
+                spaceId,
+                userId: user.id,
+            }),
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.post('/media', async (req, res, next) => {
     try {
         const spaceId = getSpaceId(req.params);

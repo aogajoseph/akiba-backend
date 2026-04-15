@@ -6,6 +6,7 @@ import {
   CreateMessageResponseDto,
   DeleteMessageResponseDto,
   ListMessagesResponseDto,
+  MarkMessagesReadResponseDto,
   ToggleMessageReactionRequestDto,
   ToggleMessageReactionResponseDto,
   UploadMediaMessageResponseDto,
@@ -23,6 +24,7 @@ import {
   createMessage,
   deleteMessage,
   listMessages,
+  markMessagesRead,
   toggleMessageReaction,
 } from '../services/chatService';
 
@@ -151,6 +153,35 @@ router.post('/', async (req: Request<GroupParams>, res, next) => {
     };
 
     res.status(201).json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/read', async (req: Request<GroupParams>, res, next) => {
+  try {
+    const spaceId = getSpaceId(req.params);
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const body = getObjectBody(req.body);
+    const rawLatestVisibleMessageTimestamp = ensureNonEmptyString(
+      body.latestVisibleMessageTimestamp,
+      'latestVisibleMessageTimestamp is required',
+    );
+    const latestVisibleMessageTimestamp = new Date(rawLatestVisibleMessageTimestamp);
+
+    if (Number.isNaN(latestVisibleMessageTimestamp.getTime())) {
+      throw createHttpError(400, 'latestVisibleMessageTimestamp must be a valid ISO date string');
+    }
+
+    const response: ApiResponse<MarkMessagesReadResponseDto> = {
+      data: await markMessagesRead({
+        latestVisibleMessageTimestamp,
+        spaceId,
+        userId: user.id,
+      }),
+    };
+
+    res.json(response);
   } catch (error) {
     next(error);
   }
