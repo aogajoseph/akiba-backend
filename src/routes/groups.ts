@@ -5,6 +5,7 @@ import {
   CreateGroupRequestDto,
   CreateGroupResponseDto,
   DeleteGroupResponseDto,
+  GetSpaceNotificationPreferenceResponseDto,
   GetGroupResponseDto,
   GetSpaceSummaryResponseDto,
   GetTransactionsSummaryResponseDto,
@@ -20,6 +21,8 @@ import {
   TransactionSource,
   UpdateGroupRequestDto,
   UpdateGroupResponseDto,
+  UpdateSpaceNotificationPreferenceRequestDto,
+  UpdateSpaceNotificationPreferenceResponseDto,
   User,
 } from '../../../shared/contracts';
 import { prisma } from '../lib/prisma';
@@ -288,6 +291,14 @@ const ensureOptionalHttpUrlString = (
   return parsedUrl.toString();
 };
 
+const ensureBooleanField = (value: unknown, fieldName: string): boolean => {
+  if (typeof value !== 'boolean') {
+    throw createHttpError(400, `${fieldName} must be a boolean`);
+  }
+
+  return value;
+};
+
 router.post('/', async (req, res, next) => {
   try {
     const user = await getCurrentUser(req.header('x-user-id'));
@@ -429,6 +440,84 @@ router.get('/:spaceId/summary', async (req: Request<SpaceParams>, res, next) => 
 
     const response: ApiResponse<GetSpaceSummaryResponseDto> = {
       data: await getSpaceSummary(spaceId, { from, to }),
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:spaceId/notification-preference', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const { spaceId } = req.params;
+
+    await getGroupById(spaceId);
+    await requireMembership(spaceId, user.id);
+
+    const preference = await prisma.spaceNotificationPreference.findUnique({
+      where: {
+        userId_spaceId: {
+          userId: user.id,
+          spaceId,
+        },
+      },
+      select: {
+        muted: true,
+      },
+    });
+
+    const response: ApiResponse<GetSpaceNotificationPreferenceResponseDto> = {
+      data: {
+        muted: preference?.muted ?? false,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/:spaceId/notification-preference', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const { spaceId } = req.params;
+    const body = getObjectBody(req.body);
+
+    await getGroupById(spaceId);
+    await requireMembership(spaceId, user.id);
+
+    const muted = ensureBooleanField(
+      (body as Partial<UpdateSpaceNotificationPreferenceRequestDto>).muted,
+      'muted',
+    );
+
+    const preference = await prisma.spaceNotificationPreference.upsert({
+      where: {
+        userId_spaceId: {
+          userId: user.id,
+          spaceId,
+        },
+      },
+      update: {
+        muted,
+      },
+      create: {
+        userId: user.id,
+        spaceId,
+        muted,
+      },
+      select: {
+        muted: true,
+      },
+    });
+
+    const response: ApiResponse<UpdateSpaceNotificationPreferenceResponseDto> = {
+      data: {
+        muted: preference.muted,
+      },
     };
 
     res.json(response);

@@ -4,7 +4,7 @@ exports.emitNotification = void 0;
 const prisma_1 = require("../lib/prisma");
 const notificationRealtimeService_1 = require("./notificationRealtimeService");
 const pushService_1 = require("./pushService");
-const emitNotification = async ({ type, spaceId, transactionId, actorId, title, body, metadata, eventKey, recipientUserIds, excludeActorFromRecipients = false, }) => {
+const emitNotification = async ({ type, spaceId, transactionId, actorId, title, body, metadata, eventKey, recipientUserIds, excludeActorFromRecipients = false, mutedUserIdsForDelivery, }) => {
     const existing = await prisma_1.prisma.notification.findUnique({
         where: { eventKey },
     });
@@ -53,7 +53,21 @@ const emitNotification = async ({ type, spaceId, transactionId, actorId, title, 
             isRead: true,
         },
     });
-    recipients.forEach((recipient) => {
+    const mutedUserIds = mutedUserIdsForDelivery !== undefined
+        ? new Set(mutedUserIdsForDelivery)
+        : spaceId
+            ? new Set((await prisma_1.prisma.spaceNotificationPreference.findMany({
+                where: {
+                    spaceId,
+                    muted: true,
+                },
+                select: {
+                    userId: true,
+                },
+            })).map((preference) => preference.userId))
+            : new Set();
+    const activeRecipients = recipients.filter((recipient) => !mutedUserIds.has(recipient.userId));
+    activeRecipients.forEach((recipient) => {
         (0, notificationRealtimeService_1.broadcastNotificationCreated)({
             userId: recipient.userId,
             notification: {
@@ -70,7 +84,7 @@ const emitNotification = async ({ type, spaceId, transactionId, actorId, title, 
             },
         });
     });
-    await Promise.allSettled(recipients.map((recipient) => (0, pushService_1.sendPushToUser)(recipient.userId, notification.title, notification.body)));
+    await Promise.allSettled(activeRecipients.map((recipient) => (0, pushService_1.sendPushToUser)(recipient.userId, notification.title, notification.body)));
     return notification;
 };
 exports.emitNotification = emitNotification;

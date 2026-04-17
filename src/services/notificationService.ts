@@ -15,6 +15,7 @@ export const emitNotification = async ({
   eventKey,
   recipientUserIds,
   excludeActorFromRecipients = false,
+  mutedUserIdsForDelivery,
 }: {
   type: NotificationType;
   spaceId?: string;
@@ -26,6 +27,7 @@ export const emitNotification = async ({
   eventKey: string;
   recipientUserIds?: string[];
   excludeActorFromRecipients?: boolean;
+  mutedUserIdsForDelivery?: string[];
 }) => {
   const existing = await prisma.notification.findUnique({
     where: { eventKey },
@@ -83,7 +85,28 @@ export const emitNotification = async ({
     },
   });
 
-  recipients.forEach((recipient) => {
+  const mutedUserIds =
+    mutedUserIdsForDelivery !== undefined
+      ? new Set(mutedUserIdsForDelivery)
+      : spaceId
+        ? new Set(
+            (
+              await prisma.spaceNotificationPreference.findMany({
+                where: {
+                  spaceId,
+                  muted: true,
+                },
+                select: {
+                  userId: true,
+                },
+              })
+            ).map((preference) => preference.userId),
+          )
+        : new Set<string>();
+
+  const activeRecipients = recipients.filter((recipient) => !mutedUserIds.has(recipient.userId));
+
+  activeRecipients.forEach((recipient) => {
     broadcastNotificationCreated({
       userId: recipient.userId,
       notification: {
@@ -102,7 +125,7 @@ export const emitNotification = async ({
   });
 
   await Promise.allSettled(
-    recipients.map((recipient) => sendPushToUser(recipient.userId, notification.title, notification.body)),
+    activeRecipients.map((recipient) => sendPushToUser(recipient.userId, notification.title, notification.body)),
   );
 
   return notification;

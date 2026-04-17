@@ -157,6 +157,12 @@ const ensureOptionalHttpUrlString = (value, fieldName) => {
     }
     return parsedUrl.toString();
 };
+const ensureBooleanField = (value, fieldName) => {
+    if (typeof value !== 'boolean') {
+        throw (0, http_1.createHttpError)(400, `${fieldName} must be a boolean`);
+    }
+    return value;
+};
 router.post('/', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
@@ -266,6 +272,72 @@ router.get('/:spaceId/summary', async (req, res, next) => {
         await requireMembership(spaceId, user.id);
         const response = {
             data: await (0, groupService_1.getSpaceSummary)(spaceId, { from, to }),
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.get('/:spaceId/notification-preference', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const { spaceId } = req.params;
+        await getGroupById(spaceId);
+        await requireMembership(spaceId, user.id);
+        const preference = await prisma_1.prisma.spaceNotificationPreference.findUnique({
+            where: {
+                userId_spaceId: {
+                    userId: user.id,
+                    spaceId,
+                },
+            },
+            select: {
+                muted: true,
+            },
+        });
+        const response = {
+            data: {
+                muted: preference?.muted ?? false,
+            },
+        };
+        res.json(response);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.patch('/:spaceId/notification-preference', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const { spaceId } = req.params;
+        const body = (0, http_1.getObjectBody)(req.body);
+        await getGroupById(spaceId);
+        await requireMembership(spaceId, user.id);
+        const muted = ensureBooleanField(body.muted, 'muted');
+        const preference = await prisma_1.prisma.spaceNotificationPreference.upsert({
+            where: {
+                userId_spaceId: {
+                    userId: user.id,
+                    spaceId,
+                },
+            },
+            update: {
+                muted,
+            },
+            create: {
+                userId: user.id,
+                spaceId,
+                muted,
+            },
+            select: {
+                muted: true,
+            },
+        });
+        const response = {
+            data: {
+                muted: preference.muted,
+            },
         };
         res.json(response);
     }

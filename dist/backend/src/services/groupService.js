@@ -1709,7 +1709,7 @@ const deleteGroup = async (groupId, requesterUserId) => {
         if (space.createdById !== requesterUserId) {
             throw (0, http_1.createHttpError)(403, 'Only the creator can delete this space');
         }
-        const [activeWithdrawalCount, completedDeposits, pendingWithdrawals, completedWithdrawals, transactionRecords, notificationsForSpace, memberRecords, chatMessageRecords,] = await Promise.all([
+        const [activeWithdrawalCount, completedDeposits, pendingWithdrawals, completedWithdrawals, transactionRecords, notificationsForSpace, memberRecords, mutedPreferenceRecords, chatMessageRecords,] = await Promise.all([
             tx.transaction.count({
                 where: {
                     spaceId: groupId,
@@ -1770,6 +1770,15 @@ const deleteGroup = async (groupId, requesterUserId) => {
             tx.spaceMember.findMany({
                 where: {
                     spaceId: groupId,
+                },
+                select: {
+                    userId: true,
+                },
+            }),
+            tx.spaceNotificationPreference.findMany({
+                where: {
+                    spaceId: groupId,
+                    muted: true,
                 },
                 select: {
                     userId: true,
@@ -1858,6 +1867,11 @@ const deleteGroup = async (groupId, requesterUserId) => {
                 spaceId: groupId,
             },
         });
+        await tx.spaceNotificationPreference.deleteMany({
+            where: {
+                spaceId: groupId,
+            },
+        });
         await tx.webhookEvent.deleteMany({
             where: {
                 spaceId: groupId,
@@ -1870,6 +1884,7 @@ const deleteGroup = async (groupId, requesterUserId) => {
         });
         return {
             memberUserIds: memberRecords.map((member) => member.userId),
+            mutedUserIds: mutedPreferenceRecords.map((preference) => preference.userId),
             spaceId: groupId,
         };
     });
@@ -1884,6 +1899,7 @@ const deleteGroup = async (groupId, requesterUserId) => {
         metadata: {},
         recipientUserIds: deletionResult.memberUserIds,
         excludeActorFromRecipients: true,
+        mutedUserIdsForDelivery: deletionResult.mutedUserIds,
     });
     return deletionResult.spaceId;
 };

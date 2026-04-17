@@ -60,6 +60,7 @@ model User {
   messages            Message[]
   messageReactions    MessageReaction[]
   spaceReadStates     SpaceReadState[]
+  spaceNotificationPreferences SpaceNotificationPreference[]
   notificationsAuthored  Notification[]          @relation("NotificationActor")
   notificationRecipients NotificationRecipient[] @relation("NotificationRecipient")
   devices             Device[]
@@ -83,6 +84,7 @@ model Space {
 
   members      SpaceMember[]
   readStates   SpaceReadState[]
+  notificationPreferences SpaceNotificationPreference[]
   transactions Transaction[]
   messages     Message[]
 }
@@ -220,6 +222,22 @@ model SpaceReadState {
   @@unique([userId, spaceId])
   @@index([spaceId, lastReadAt])
   @@index([userId, lastReadAt])
+}
+
+model SpaceNotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String
+  spaceId   String
+  muted     Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id])
+  space Space @relation(fields: [spaceId], references: [id])
+
+  @@unique([userId, spaceId])
+  @@index([spaceId, muted])
+  @@index([userId, muted])
 }
 
 model Device {

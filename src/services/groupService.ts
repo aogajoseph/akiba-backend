@@ -2248,6 +2248,7 @@ export const deleteGroup = async (
       transactionRecords,
       notificationsForSpace,
       memberRecords,
+      mutedPreferenceRecords,
       chatMessageRecords,
     ] = await Promise.all([
       tx.transaction.count({
@@ -2310,6 +2311,15 @@ export const deleteGroup = async (
       tx.spaceMember.findMany({
         where: {
           spaceId: groupId,
+        },
+        select: {
+          userId: true,
+        },
+      }),
+      tx.spaceNotificationPreference.findMany({
+        where: {
+          spaceId: groupId,
+          muted: true,
         },
         select: {
           userId: true,
@@ -2409,6 +2419,11 @@ export const deleteGroup = async (
         spaceId: groupId,
       },
     });
+    await tx.spaceNotificationPreference.deleteMany({
+      where: {
+        spaceId: groupId,
+      },
+    });
     await tx.webhookEvent.deleteMany({
       where: {
         spaceId: groupId,
@@ -2422,6 +2437,7 @@ export const deleteGroup = async (
 
     return {
       memberUserIds: memberRecords.map((member) => member.userId),
+      mutedUserIds: mutedPreferenceRecords.map((preference) => preference.userId),
       spaceId: groupId,
     };
   });
@@ -2437,6 +2453,7 @@ export const deleteGroup = async (
     metadata: {},
     recipientUserIds: deletionResult.memberUserIds,
     excludeActorFromRecipients: true,
+    mutedUserIdsForDelivery: deletionResult.mutedUserIds,
   });
 
   return deletionResult.spaceId;
