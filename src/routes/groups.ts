@@ -474,6 +474,8 @@ router.get('/:spaceId/notification-preference', async (req: Request<SpaceParams>
       },
     };
 
+    console.log('RETURN MUTED:', preference?.muted ?? false);
+
     res.json(response);
   } catch (error) {
     next(error);
@@ -493,6 +495,8 @@ router.patch('/:spaceId/notification-preference', async (req: Request<SpaceParam
       (body as Partial<UpdateSpaceNotificationPreferenceRequestDto>).muted,
       'muted',
     );
+
+    console.log('SAVE MUTED:', muted);
 
     const preference = await prisma.spaceNotificationPreference.upsert({
       where: {
@@ -519,6 +523,8 @@ router.patch('/:spaceId/notification-preference', async (req: Request<SpaceParam
         muted: preference.muted,
       },
     };
+
+    console.log('RETURN MUTED:', preference.muted);
 
     res.json(response);
   } catch (error) {
