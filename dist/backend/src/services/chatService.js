@@ -16,6 +16,11 @@ const normalizeMessageMedia = (media) => {
         if (item.type !== 'image' && item.type !== 'video') {
             throw (0, http_1.createHttpError)(400, 'Media type must be image or video');
         }
+        if (/\/media\//i.test(normalizedUrl)) {
+            console.warn('Persisting local chat media URL instead of hosted media URL', {
+                url: normalizedUrl,
+            });
+        }
         return {
             type: item.type,
             url: normalizedUrl,
