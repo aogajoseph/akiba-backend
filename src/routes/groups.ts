@@ -42,6 +42,7 @@ import {
   createSpace,
   createWithdrawal,
   deleteGroup,
+  generateInviteLink,
   getSpaceFinancialSnapshotBySpaceIds,
   getSpaceSummary,
   getTransactionsSummary,
@@ -443,6 +444,22 @@ router.get('/:spaceId/summary', async (req: Request<SpaceParams>, res, next) => 
     };
 
     res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:spaceId/invite-link', async (req: Request<SpaceParams>, res, next) => {
+  try {
+    const user = await getCurrentUser(req.header('x-user-id'));
+    const spaceId = ensureNonEmptyString(req.params.spaceId, 'spaceId is required');
+    const link = await generateInviteLink(spaceId, user.id);
+
+    res.json({
+      data: {
+        link,
+      },
+    } satisfies ApiResponse<{ link: string }>);
   } catch (error) {
     next(error);
   }

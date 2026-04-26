@@ -279,6 +279,21 @@ router.get('/:spaceId/summary', async (req, res, next) => {
         next(error);
     }
 });
+router.get('/:spaceId/invite-link', async (req, res, next) => {
+    try {
+        const user = await getCurrentUser(req.header('x-user-id'));
+        const spaceId = (0, http_1.ensureNonEmptyString)(req.params.spaceId, 'spaceId is required');
+        const link = await (0, groupService_1.generateInviteLink)(spaceId, user.id);
+        res.json({
+            data: {
+                link,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.get('/:spaceId/notification-preference', async (req, res, next) => {
     try {
         const user = await getCurrentUser(req.header('x-user-id'));
@@ -301,6 +316,7 @@ router.get('/:spaceId/notification-preference', async (req, res, next) => {
                 muted: preference?.muted ?? false,
             },
         };
+        console.log('RETURN MUTED:', preference?.muted ?? false);
         res.json(response);
     }
     catch (error) {
@@ -315,6 +331,7 @@ router.patch('/:spaceId/notification-preference', async (req, res, next) => {
         await getGroupById(spaceId);
         await requireMembership(spaceId, user.id);
         const muted = ensureBooleanField(body.muted, 'muted');
+        console.log('SAVE MUTED:', muted);
         const preference = await prisma_1.prisma.spaceNotificationPreference.upsert({
             where: {
                 userId_spaceId: {
@@ -339,6 +356,7 @@ router.patch('/:spaceId/notification-preference', async (req, res, next) => {
                 muted: preference.muted,
             },
         };
+        console.log('RETURN MUTED:', preference.muted);
         res.json(response);
     }
     catch (error) {

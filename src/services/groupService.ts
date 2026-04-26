@@ -1092,6 +1092,44 @@ export const getSpaceMembers = async (spaceId: string): Promise<SpaceMemberDto[]
   return members.map(mapDbSpaceMemberToSpaceMember);
 };
 
+export const generateInviteLink = async (
+  spaceId: string,
+  userId: string,
+): Promise<string> => {
+  const space = await prisma.space.findUnique({
+    where: {
+      id: spaceId,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!space) {
+    throw createHttpError(404, 'ERR_SPACE_NOT_FOUND');
+  }
+
+  const membership = await prisma.spaceMember.findFirst({
+    where: {
+      spaceId: space.id,
+      userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!membership) {
+    throw createHttpError(403, 'ERR_NOT_SPACE_MEMBER');
+  }
+
+  const baseUrl = 'https://akiba.app/invite';
+  const encodedSpaceName = encodeURIComponent(space.name);
+
+  return `${baseUrl}?spaceId=${space.id}&spaceName=${encodedSpaceName}`;
+};
+
 export const updateGroup = async (
   groupId: string,
   actorUserId: string,

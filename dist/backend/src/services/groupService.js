@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.listWithdrawalApprovals = exports.executeWithdrawal = exports.rejectWithdrawal = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = exports.getCompletedBalanceForSpace = exports.getSpaceSummary = exports.getSpaceFinancialSnapshotBySpaceIds = exports.getCompletedBalancesBySpaceIds = exports.getAvailableBalanceForSpace = void 0;
+exports.deleteGroup = exports.leaveGroup = exports.revokeMember = exports.promoteMember = exports.getTransactionsSummary = exports.listWithdrawalApprovals = exports.executeWithdrawal = exports.rejectWithdrawal = exports.approveWithdrawal = exports.createWithdrawal = exports.createDeposit = exports.processMpesaWebhookPayment = exports.getSignatoryReport = exports.joinGroup = exports.updateGroup = exports.generateInviteLink = exports.getSpaceMembers = exports.leaveSpace = exports.joinSpace = exports.createSpace = exports.createGroup = exports.finalizeWebhookLog = exports.storeWebhookPayload = exports.getCompletedBalanceForSpace = exports.getSpaceSummary = exports.getSpaceFinancialSnapshotBySpaceIds = exports.getCompletedBalancesBySpaceIds = exports.getAvailableBalanceForSpace = void 0;
 const contracts_1 = require("../../../shared/contracts");
 const phone_1 = require("../../../shared/phone");
 const client_1 = require("@prisma/client");
@@ -796,6 +796,36 @@ const getSpaceMembers = async (spaceId) => {
     return members.map(mapDbSpaceMemberToSpaceMember);
 };
 exports.getSpaceMembers = getSpaceMembers;
+const generateInviteLink = async (spaceId, userId) => {
+    const space = await prisma_1.prisma.space.findUnique({
+        where: {
+            id: spaceId,
+        },
+        select: {
+            id: true,
+            name: true,
+        },
+    });
+    if (!space) {
+        throw (0, http_1.createHttpError)(404, 'ERR_SPACE_NOT_FOUND');
+    }
+    const membership = await prisma_1.prisma.spaceMember.findFirst({
+        where: {
+            spaceId: space.id,
+            userId,
+        },
+        select: {
+            id: true,
+        },
+    });
+    if (!membership) {
+        throw (0, http_1.createHttpError)(403, 'ERR_NOT_SPACE_MEMBER');
+    }
+    const baseUrl = 'https://akiba.app/invite';
+    const encodedSpaceName = encodeURIComponent(space.name);
+    return `${baseUrl}?spaceId=${space.id}&spaceName=${encodedSpaceName}`;
+};
+exports.generateInviteLink = generateInviteLink;
 const updateGroup = async (groupId, actorUserId, dto) => {
     const space = await getSpaceOrThrow(groupId);
     await getSpaceMembershipOrThrow(groupId, actorUserId);
